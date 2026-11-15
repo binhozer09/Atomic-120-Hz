@@ -63,10 +63,12 @@ class MainActivity : Activity() {
     private fun handleNotificationCode(source: Intent?) {
         val code = source?.getStringExtra(PairCodeReceiver.EXTRA_CODE) ?: return
         val pairingPort = source.getIntExtra(PairCodeReceiver.EXTRA_PORT, -1)
+        val pairingHost = source.getStringExtra(PairCodeReceiver.EXTRA_HOST)
         source.removeExtra(PairCodeReceiver.EXTRA_CODE)
         source.removeExtra(PairCodeReceiver.EXTRA_PORT)
-        appendLog("Código recebido pela notificação. Porta descoberta previamente: $pairingPort.")
-        pairAndConnect(code, pairingPort)
+        source.removeExtra(PairCodeReceiver.EXTRA_HOST)
+        appendLog("Código recebido pela notificação. Endpoint descoberto: $pairingHost:$pairingPort.")
+        pairAndConnect(code, pairingHost ?: "", pairingPort)
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -92,10 +94,11 @@ class MainActivity : Activity() {
         thread {
             try {
                 val endpoint = discoverAdbEndpoint("_adb-tls-pairing._tcp.")
+                val pairingHost = endpoint.first
                 val pairingPort = endpoint.second
-                appendFromWorker("Porta de pareamento identificada: $pairingPort. Preparando notificação com essa porta.")
+                appendFromWorker("Endpoint de pareamento identificado: $pairingHost:$pairingPort. Preparando notificação.")
                 runOnUiThread {
-                    showPairingNotification(pairingPort)
+                    showPairingNotification(pairingHost, pairingPort)
                     appendLog("Serviço ADB encontrado. Digite os 6 dígitos na notificação e toque em ENVIAR CÓDIGO.")
                     pairButton.isEnabled = true
                 }
@@ -108,7 +111,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun showPairingNotification(pairingPort: Int) {
+    private fun showPairingNotification(pairingHost: String, pairingPort: Int) {
         val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) {
             manager.createNotificationChannel(
@@ -121,7 +124,9 @@ class MainActivity : Activity() {
         val remoteInput = RemoteInput.Builder(PairCodeReceiver.KEY_CODE)
             .setLabel("Digite o código de 6 dígitos")
             .build()
-        val receiverIntent = Intent(this, PairCodeReceiver::class.java).setPackage(packageName).putExtra(PairCodeReceiver.EXTRA_PORT, pairingPort)
+        val receiverIntent = Intent(this, PairCodeReceiver::class.java).setPackage(packageName)
+            .putExtra(PairCodeReceiver.EXTRA_HOST, pairingHost)
+            .putExtra(PairCodeReceiver.EXTRA_PORT, pairingPort)
         val pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT or
             (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
         val replyPendingIntent = PendingIntent.getBroadcast(this, 120, receiverIntent, pendingFlags)
@@ -228,22 +233,22 @@ class MainActivity : Activity() {
         updateChoices()
     }
 
-    private fun pairAndConnect(code: String, pairingPort: Int) {
+    private fun pairAndConnect(code: String, pairingHost: String, pairingPort: Int) {
         if (busy) return
-        if (!code.matches(Regex("\\d{6}")) || pairingPort !in 1..65535) {
-            appendLog("Código ou porta de pareamento inválidos. Toque em LIBERAR ACESSO para redescobrir o serviço.")
+        if (!code.matches(Regex("\\d{6}")) || pairingHost.isBlank() || pairingPort !in 1..65535) {
+            appendLog("Código ou endpoint de pareamento inválidos. Toque em LIBERAR ACESSO para redescobrir o serviço.")
             return
         }
         setBusy(true)
         appendLog("Iniciando descoberta mDNS do serviço ADB de pareamento…")
         thread {
             try {
-                appendFromWorker("Usando a porta mDNS guardada na notificação: $pairingPort. Conectando pelo loopback 127.0.0.1 como no Shizuku…")
-                runBlocking { Kadb.pair("127.0.0.1", pairingPort, code) }
+                appendFromWorker("Pareando pelo endereço mDNS real do aparelho: $pairingHost:$pairingPort…")
+                runBlocking { Kadb.pair(pairingHost, pairingPort, code) }
                 appendFromWorker("Pareamento aceito. Procurando a porta segura de conexão…")
                 val connectEndpoint = discoverAdbEndpoint("_adb-tls-connect._tcp.")
-                appendFromWorker("Serviço de conexão identificado em ${connectEndpoint.first}:${connectEndpoint.second}. Abrindo sessão local…")
-                val connection = Kadb.create("127.0.0.1", connectEndpoint.second)
+                appendFromWorker("Serviço de conexão identificado em ${connectEndpoint.first}:${connectEndpoint.second}. Abrindo sessão TLS…")
+                val connection = Kadb.create(connectEndpoint.first, connectEndpoint.second)
                 val check = connection.shell("echo ATOMIC_ADB_OK")
                 if (check.exitCode != 0 || !check.allOutput.contains("ATOMIC_ADB_OK")) {
                     connection.close()
@@ -312,26 +317,21 @@ class MainActivity : Activity() {
             }
 
             override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
-                val host = serviceInfo.host?.hostAddress
+                val resolvedAddress = serviceInfo.host
+                val host = resolvedAddress?.hostAddress
                 val localAddress = try {
-                    !host.isNullOrBlank() && java.net.NetworkInterface.getNetworkInterfaces()
+                    resolvedAddress != null && java.net.NetworkInterface.getNetworkInterfaces()
                         .asSequence()
+                        .filter { it.isUp }
                         .any { networkInterface ->
-                            networkInterface.inetAddresses.asSequence().any { it.hostAddress == host }
+                            networkInterface.inetAddresses.asSequence().any { it == resolvedAddress }
                         }
                 } catch (_: Exception) { false }
-                // Shizuku accepts only the phone's own mDNS endpoint and then connects
-                // through loopback, never through a hard-coded LAN address.
-                val localPortActive = try {
-                    java.net.ServerSocket().use { socket ->
-                        socket.bind(java.net.InetSocketAddress("127.0.0.1", serviceInfo.port), 1)
-                        false
-                    }
-                } catch (_: java.io.IOException) { true }
-                if (localAddress && localPortActive && serviceInfo.port in 1..65535) {
-                    endpoint.set("127.0.0.1" to serviceInfo.port)
+                // Keep the exact mDNS-resolved interface address; adbd may not bind loopback.
+                if (localAddress && !host.isNullOrBlank() && serviceInfo.port in 1..65535) {
+                    endpoint.set(host to serviceInfo.port)
                 } else {
-                    failure.set("Serviço mDNS encontrado, mas não corresponde a uma porta ADB local ativa do próprio celular (host=$host, porta=${serviceInfo.port}).")
+                    failure.set("Serviço mDNS resolvido, mas o endereço não corresponde a uma interface local ativa (host=$host, porta=${serviceInfo.port}).")
                 }
                 latch.countDown()
             }
@@ -590,6 +590,7 @@ class PairCodeReceiver : BroadcastReceiver() {
         val launch = Intent(context, MainActivity::class.java).apply {
             putExtra(EXTRA_CODE, code)
             putExtra(EXTRA_PORT, intent.getIntExtra(EXTRA_PORT, -1))
+            putExtra(EXTRA_HOST, intent.getStringExtra(EXTRA_HOST))
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
         context.startActivity(launch)
@@ -599,5 +600,6 @@ class PairCodeReceiver : BroadcastReceiver() {
         const val KEY_CODE = "atomic_pairing_code"
         const val EXTRA_CODE = "atomic_pairing_code_extra"
         const val EXTRA_PORT = "atomic_pairing_port_extra"
+        const val EXTRA_HOST = "atomic_pairing_host_extra"
     }
 }
