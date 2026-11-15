@@ -179,8 +179,7 @@ class MainActivity : Activity() {
                 val output = process.inputStream.bufferedReader().use { it.readText() }
                 val error = process.errorStream.bufferedReader().use { it.readText() }
                 val exit = process.waitFor()
-                runOnUiThread { onResult(exit == 0, (output + "\
-" + error).trim()) }
+                runOnUiThread { onResult(exit == 0, (output + "\\n" + error).trim()) }
             } catch (e: Exception) {
                 runOnUiThread { onResult(false, e.message ?: "Falha ao executar comando Shizuku") }
             }
@@ -262,12 +261,9 @@ class MainActivity : Activity() {
         val d = window.decorView.display
         val modes = d?.supportedModes?.map { it.refreshRate.toInt().toString() }?.distinct()
         val current = d?.refreshRate
-        detected.text = "FREQUÊNCIA REPORTADA
-" +
+        detected.text = "FREQUÊNCIA REPORTADA\\n" +
             (current?.let { it.toInt().toString() + " Hz" } ?: "Indisponível") +
-            "
-
-Modos informados: " + (modes?.joinToString(" / ")?.plus(" Hz") ?: "não disponíveis")
+            "\\n\\nModos informados: " + (modes?.joinToString(" / ")?.plus(" Hz") ?: "não disponíveis")
     }
 
     private fun updateButtons() {
