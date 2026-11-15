@@ -350,7 +350,7 @@ class MainActivity : Activity() {
             appendFromWorker(title)
             appendFromWorker("$ " + cmd)
             val result = connection.shell(cmd)
-            appendFromWorker("SAÍDA:\\n" + result.allOutput.ifBlank { "(sem saída)" } + "\\nCÓDIGO DE SAÍDA: " + result.exitCode)
+            appendFromWorker("SAÍDA:\n" + result.allOutput.ifBlank { "(sem saída)" } + "\nCÓDIGO DE SAÍDA: " + result.exitCode)
             if (result.exitCode != 0) {
                 appendFromWorker("COMANDO RECUSADO/FALHOU (código ${result.exitCode}).")
                 return ""
