@@ -23,5 +23,4 @@ android {
 dependencies {
     // ADB client próprio do Atomic: pareamento TLS e shell sem depender do app Shizuku.
     implementation("com.flyfishxu:kadb:2.1.5")
-    implementation("com.flyfishxu:kadb-mdns:2.1.5")
 }
