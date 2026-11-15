@@ -46,7 +46,12 @@ class MainActivity : Activity() {
         updateShizukuStatus()
     }
 
-    override fun onDestroy() {\n        Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)\n        super.onDestroy()\n    }\n\n    private fun buildUi() {
+    override fun onDestroy() {
+        Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
+        super.onDestroy()
+    }
+
+    private fun buildUi() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
@@ -115,7 +120,15 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setTextColor(0xFF9ABBD5.toInt())
         }, match())
-        shizukuButton = Button(this).apply {\n            text = "CONECTAR SHIZUKU"\n            isAllCaps = false\n            setOnClickListener { connectShizuku() }\n        }\n        root.addView(shizukuButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(54)))\n        root.addView(space(18))\n        root.addView(TextView(this).apply {\n            text = "O Shizuku não remove limites internos de FPS do jogo. Ele permite apenas operações que o Android autoriza ao serviço ADB/root."
+        shizukuButton = Button(this).apply {
+            text = "CONECTAR SHIZUKU"
+            isAllCaps = false
+            setOnClickListener { connectShizuku() }
+        }
+        root.addView(shizukuButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(54)))
+        root.addView(space(18))
+        root.addView(TextView(this).apply {
+            text = "O Shizuku não remove limites internos de FPS do jogo. Ele permite apenas operações que o Android autoriza ao serviço ADB/root."
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(0xFF7894AD.toInt())
@@ -166,7 +179,8 @@ class MainActivity : Activity() {
                 val output = process.inputStream.bufferedReader().use { it.readText() }
                 val error = process.errorStream.bufferedReader().use { it.readText() }
                 val exit = process.waitFor()
-                runOnUiThread { onResult(exit == 0, (output + "\\n" + error).trim()) }
+                runOnUiThread { onResult(exit == 0, (output + "\
+" + error).trim()) }
             } catch (e: Exception) {
                 runOnUiThread { onResult(false, e.message ?: "Falha ao executar comando Shizuku") }
             }
@@ -248,9 +262,12 @@ class MainActivity : Activity() {
         val d = window.decorView.display
         val modes = d?.supportedModes?.map { it.refreshRate.toInt().toString() }?.distinct()
         val current = d?.refreshRate
-        detected.text = "FREQUÊNCIA REPORTADA\n" +
+        detected.text = "FREQUÊNCIA REPORTADA
+" +
             (current?.let { it.toInt().toString() + " Hz" } ?: "Indisponível") +
-            "\n\nModos informados: " + (modes?.joinToString(" / ")?.plus(" Hz") ?: "não disponíveis")
+            "
+
+Modos informados: " + (modes?.joinToString(" / ")?.plus(" Hz") ?: "não disponíveis")
     }
 
     private fun updateButtons() {
