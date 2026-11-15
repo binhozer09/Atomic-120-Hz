@@ -10,9 +10,8 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.content.Intent
+import android.provider.Settings
 import android.net.Uri
-import android.content.pm.PackageManager
-import rikka.shizuku.Shizuku
 import android.content.res.ColorStateList
 import android.graphics.Color
 import kotlin.math.abs
@@ -27,24 +26,13 @@ class MainActivity : Activity() {
     private lateinit var hz120: Button
     private lateinit var accessStatus: TextView
     private lateinit var accessButton: Button
-    private val shizukuRequestCode = 12090
-    private val binderReceivedListener = Runnable { runOnUiThread { refreshAtomicAccess() } }
-    private val binderDeadListener = Runnable { runOnUiThread { refreshAtomicAccess() } }
-    private val permissionResultListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
-        if (requestCode == shizukuRequestCode) runOnUiThread {
-            accessStatus.text = if (grantResult == PackageManager.PERMISSION_GRANTED) "Atomic Access autorizado. Ponte privilegiada conectada." else "Autorização negada. Você pode autorizar novamente."
-            refreshAtomicAccess()
-        }
-    }
+    private val prefs by lazy { getSharedPreferences("atomic_access", MODE_PRIVATE) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = Color.rgb(5, 15, 29)
         window.navigationBarColor = Color.rgb(5, 15, 29)
         buildUi()
-        Shizuku.addBinderReceivedListener(binderReceivedListener)
-        Shizuku.addBinderDeadListener(binderDeadListener)
-        Shizuku.addRequestPermissionResultListener(permissionResultListener)
         refreshDisplayInfo()
         refreshAtomicAccess()
     }
@@ -140,55 +128,68 @@ class MainActivity : Activity() {
     }
 
     private fun activateAtomicAccess() {
-        if (!Shizuku.pingBinder()) {
-            accessStatus.text = "Serviço privilegiado não iniciado. Ative a Depuração sem fio e inicie o serviço Shizuku/Sui. O Atomic não consegue obter esse privilégio sozinho."
-            try {
-                startActivity(Intent("android.settings.APPLICATION_DEVELOPMENT_SETTINGS"))
-            } catch (_: Exception) {
-                startActivity(Intent(android.provider.Settings.ACTION_SETTINGS))
-            }
+        if (Settings.System.canWrite(this)) {
+            refreshAtomicAccess()
             return
         }
-        if (Shizuku.isPreV11()) {
-            accessStatus.text = "Versão do serviço incompatível. Atualize o Shizuku/Sui."
-            return
-        }
-        when {
-            Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED -> {
-                accessStatus.text = "Atomic Access autorizado. UID de serviço: " + Shizuku.getUid() + "."
-            }
-            Shizuku.shouldShowRequestPermissionRationale() -> {
-                accessStatus.text = "Permissão necessária. Autorize o Atomic na solicitação do sistema."
-                Shizuku.requestPermission(shizukuRequestCode)
-            }
-            else -> {
-                accessStatus.text = "Solicitando autorização segura…"
-                Shizuku.requestPermission(shizukuRequestCode)
-            }
-        }
+        accessStatus.text = "Autorize o Atomic a modificar configurações do sistema na próxima tela."
+        startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:$packageName")))
     }
 
     private fun refreshAtomicAccess() {
         if (!::accessStatus.isInitialized) return
-        if (!Shizuku.pingBinder()) {
-            accessStatus.text = "Desconectado: serviço privilegiado não está iniciado."
-            accessButton.text = "CONFIGURAR ATOMIC ACCESS"
-            return
-        }
-        val granted = try { Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED } catch (_: Exception) { false }
-        accessStatus.text = if (granted) {
-            "Conectado e autorizado • UID " + Shizuku.getUid()
-        } else {
-            "Serviço encontrado, aguardando autorização do usuário."
-        }
-        accessButton.text = if (granted) "ATOMIC ACCESS AUTORIZADO" else "AUTORIZAR ATOMIC ACCESS"
+        val granted = Settings.System.canWrite(this)
+        accessStatus.text = if (granted) "Acesso especial concedido • controle de taxa de atualização disponível." else "Aguardando autorização especial do Android."
+        accessButton.text = if (granted) "ATOMIC ACCESS LIBERADO" else "LIBERAR ATOMIC ACCESS"
     }
 
-    override fun onDestroy() {
-        Shizuku.removeBinderReceivedListener(binderReceivedListener)
-        Shizuku.removeBinderDeadListener(binderDeadListener)
-        Shizuku.removeRequestPermissionResultListener(permissionResultListener)
-        super.onDestroy()
+    override fun onResume() {
+        super.onResume()
+        if (::accessStatus.isInitialized) refreshAtomicAccess()
+    }
+
+    private fun enableMode() {
+        if (!Settings.System.canWrite(this)) {
+            status.text = "Primeiro libere o Atomic Access abaixo."
+            activateAtomicAccess()
+            return
+        }
+        val resolver = contentResolver
+        if (!prefs.getBoolean("saved_original", false)) {
+            prefs.edit()
+                .putString("old_peak", Settings.System.getString(resolver, "peak_refresh_rate"))
+                .putString("old_min", Settings.System.getString(resolver, "min_refresh_rate"))
+                .putBoolean("saved_original", true).apply()
+        }
+        val target = selectedHz.toString()
+        Settings.System.putString(resolver, "peak_refresh_rate", target)
+        Settings.System.putString(resolver, "min_refresh_rate", target)
+        val actualPeak = Settings.System.getString(resolver, "peak_refresh_rate")
+        val actualMin = Settings.System.getString(resolver, "min_refresh_rate")
+        val verified = actualPeak == target && actualMin == target
+        enabled = verified
+        toggle.text = if (verified) "LIGADO" else "NÃO CONFIRMADO"
+        toggle.backgroundTintList = ColorStateList.valueOf(if (verified) 0xFF087A58.toInt() else 0xFF8A4A20.toInt())
+        status.text = if (verified) "Sistema aceitou $target Hz. Isso não comprova FPS do Free Fire." else "O Android/fabricante não confirmou: peak=$actualPeak • min=$actualMin."
+        refreshDisplayInfo()
+    }
+
+    private fun disableMode() {
+        if (!Settings.System.canWrite(this)) {
+            status.text = "Sem Atomic Access: não foi possível restaurar as configurações."
+            activateAtomicAccess()
+            return
+        }
+        val oldP = prefs.getString("old_peak", null)
+        val oldM = prefs.getString("old_min", null)
+        Settings.System.putString(contentResolver, "peak_refresh_rate", oldP)
+        Settings.System.putString(contentResolver, "min_refresh_rate", oldM)
+        prefs.edit().remove("old_peak").remove("old_min").putBoolean("saved_original", false).apply()
+        enabled = false
+        toggle.text = "DESLIGADO"
+        toggle.backgroundTintList = ColorStateList.valueOf(0xFF174568.toInt())
+        status.text = "Configurações anteriores restauradas quando suportadas pelo fabricante."
+        refreshDisplayInfo()
     }
 
     private fun choose(hz: Float) {
