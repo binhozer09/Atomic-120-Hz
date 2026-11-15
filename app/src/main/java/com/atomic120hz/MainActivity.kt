@@ -43,6 +43,8 @@ class MainActivity : Activity() {
     private lateinit var modeButton: Button
     private lateinit var hz90: Button
     private lateinit var hz120: Button
+    private lateinit var terminalInput: EditText
+    private lateinit var terminalButton: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -200,7 +202,24 @@ class MainActivity : Activity() {
             setPadding(dp(12), dp(12), dp(12), dp(12))
             setBackgroundColor(0xFF102943.toInt())
         }
-        root.addView(logView, match())
+        root.addView(logView, LinearLayout.LayoutParams(-1, dp(260)))
+        terminalInput = EditText(this).apply {
+            hint = "Digite um comando ADB shell"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            setTextColor(Color.WHITE)
+            setHintTextColor(0xFF7894AD.toInt())
+            textSize = 14f
+            setSingleLine(true)
+            backgroundTintList = ColorStateList.valueOf(0xFF55C9FF.toInt())
+        }
+        root.addView(terminalInput, match())
+        terminalButton = Button(this).apply {
+            text = "EXECUTAR COMANDO"
+            isAllCaps = false
+            isEnabled = false
+            setOnClickListener { executeTerminalCommand() }
+        }
+        root.addView(terminalButton, LinearLayout.LayoutParams(-1, dp(52)))
         setContentView(ScrollView(this).apply { addView(root) })
         updateChoices()
     }
@@ -462,14 +481,39 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun executeTerminalCommand() {
+        val connection = adb
+        val command = terminalInput.text.toString().trim()
+        if (!adbReady || connection == null) {
+            appendLog("ADB desconectado. Autorize e conecte primeiro.")
+            return
+        }
+        if (command.isBlank()) return
+        terminalInput.setText("")
+        terminalButton.isEnabled = false
+        thread {
+            try {
+                appendFromWorker("$ " + command)
+                val result = connection.shell(command)
+                appendFromWorker("SAÍDA:\\n" + result.allOutput.ifBlank { "(sem saída)" } + "\\nCÓDIGO DE SAÍDA: " + result.exitCode)
+            } catch (e: Exception) {
+                appendFromWorker("ERRO DE EXECUÇÃO: " + (e.message ?: e.javaClass.simpleName))
+            } finally {
+                runOnUiThread { terminalButton.isEnabled = adbReady && !busy }
+            }
+        }
+    }
+
     private fun appendLog(message: String) {
-        logView.text = logView.text.toString() + "\n> " + message
+        val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+        logView.text = logView.text.toString() + "\\n[" + time + "] > " + message
     }
 
     private fun setBusy(value: Boolean) {
         busy = value
         pairButton.isEnabled = !value
         modeButton.isEnabled = !value && adbReady
+        if (::terminalButton.isInitialized) terminalButton.isEnabled = !value && adbReady
     }
 
     private fun updateChoices() {
