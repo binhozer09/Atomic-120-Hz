@@ -9,6 +9,10 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.content.Intent
+import android.net.Uri
+import android.content.pm.PackageManager
+import rikka.shizuku.Shizuku
 import android.content.res.ColorStateList
 import android.graphics.Color
 import kotlin.math.abs
@@ -21,13 +25,28 @@ class MainActivity : Activity() {
     private lateinit var toggle: Button
     private lateinit var hz90: Button
     private lateinit var hz120: Button
+    private lateinit var accessStatus: TextView
+    private lateinit var accessButton: Button
+    private val shizukuRequestCode = 12090
+    private val binderReceivedListener = Runnable { runOnUiThread { refreshAtomicAccess() } }
+    private val binderDeadListener = Runnable { runOnUiThread { refreshAtomicAccess() } }
+    private val permissionResultListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+        if (requestCode == shizukuRequestCode) runOnUiThread {
+            accessStatus.text = if (grantResult == PackageManager.PERMISSION_GRANTED) "Atomic Access autorizado. Ponte privilegiada conectada." else "Autorização negada. Você pode autorizar novamente."
+            refreshAtomicAccess()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = Color.rgb(5, 15, 29)
         window.navigationBarColor = Color.rgb(5, 15, 29)
         buildUi()
+        Shizuku.addBinderReceivedListener(binderReceivedListener)
+        Shizuku.addBinderDeadListener(binderDeadListener)
+        Shizuku.addRequestPermissionResultListener(permissionResultListener)
         refreshDisplayInfo()
+        refreshAtomicAccess()
     }
 
     private fun buildUi() {
@@ -84,6 +103,31 @@ class MainActivity : Activity() {
             setTextColor(0xFF9ABBD5.toInt())
         }
         root.addView(status, match())
+        root.addView(space(22))
+        root.addView(TextView(this).apply {
+            text = "ATOMIC ACCESS"
+            textSize = 17f
+            gravity = Gravity.CENTER
+            setTextColor(0xFF55C9FF.toInt())
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+        }, match())
+        root.addView(space(8))
+        accessStatus = TextView(this).apply {
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setTextColor(0xFF9ABBD5.toInt())
+            text = "Verificando serviço de autorização…"
+        }
+        root.addView(accessStatus, match())
+        root.addView(space(10))
+        accessButton = Button(this).apply {
+            text = "ATIVAR ATOMIC ACCESS"
+            isAllCaps = false
+            setTextColor(Color.WHITE)
+            backgroundTintList = ColorStateList.valueOf(0xFF155A88.toInt())
+            setOnClickListener { activateAtomicAccess() }
+        }
+        root.addView(accessButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(58)))
         root.addView(space(18))
         root.addView(TextView(this).apply {
             text = "Hz da tela não garante FPS igual dentro do jogo. O Android e o fabricante podem limitar a frequência solicitada."
@@ -93,6 +137,58 @@ class MainActivity : Activity() {
         }, match())
         setContentView(ScrollView(this).apply { addView(root) })
         updateButtons()
+    }
+
+    private fun activateAtomicAccess() {
+        if (!Shizuku.pingBinder()) {
+            accessStatus.text = "Serviço privilegiado não iniciado. Ative a Depuração sem fio e inicie o serviço Shizuku/Sui. O Atomic não consegue obter esse privilégio sozinho."
+            try {
+                startActivity(Intent("android.settings.APPLICATION_DEVELOPMENT_SETTINGS"))
+            } catch (_: Exception) {
+                startActivity(Intent(android.provider.Settings.ACTION_SETTINGS))
+            }
+            return
+        }
+        if (Shizuku.isPreV11()) {
+            accessStatus.text = "Versão do serviço incompatível. Atualize o Shizuku/Sui."
+            return
+        }
+        when {
+            Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED -> {
+                accessStatus.text = "Atomic Access autorizado. UID de serviço: " + Shizuku.getUid() + "."
+            }
+            Shizuku.shouldShowRequestPermissionRationale() -> {
+                accessStatus.text = "Permissão necessária. Autorize o Atomic na solicitação do sistema."
+                Shizuku.requestPermission(shizukuRequestCode)
+            }
+            else -> {
+                accessStatus.text = "Solicitando autorização segura…"
+                Shizuku.requestPermission(shizukuRequestCode)
+            }
+        }
+    }
+
+    private fun refreshAtomicAccess() {
+        if (!::accessStatus.isInitialized) return
+        if (!Shizuku.pingBinder()) {
+            accessStatus.text = "Desconectado: serviço privilegiado não está iniciado."
+            accessButton.text = "CONFIGURAR ATOMIC ACCESS"
+            return
+        }
+        val granted = try { Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED } catch (_: Exception) { false }
+        accessStatus.text = if (granted) {
+            "Conectado e autorizado • UID " + Shizuku.getUid()
+        } else {
+            "Serviço encontrado, aguardando autorização do usuário."
+        }
+        accessButton.text = if (granted) "ATOMIC ACCESS AUTORIZADO" else "AUTORIZAR ATOMIC ACCESS"
+    }
+
+    override fun onDestroy() {
+        Shizuku.removeBinderReceivedListener(binderReceivedListener)
+        Shizuku.removeBinderDeadListener(binderDeadListener)
+        Shizuku.removeRequestPermissionResultListener(permissionResultListener)
+        super.onDestroy()
     }
 
     private fun choose(hz: Float) {
