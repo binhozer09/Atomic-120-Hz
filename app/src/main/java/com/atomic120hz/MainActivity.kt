@@ -62,9 +62,11 @@ class MainActivity : Activity() {
 
     private fun handleNotificationCode(source: Intent?) {
         val code = source?.getStringExtra(PairCodeReceiver.EXTRA_CODE) ?: return
+        val pairingPort = source.getIntExtra(PairCodeReceiver.EXTRA_PORT, -1)
         source.removeExtra(PairCodeReceiver.EXTRA_CODE)
-        appendLog("Código recebido pela notificação. Iniciando pareamento ADB…")
-        pairAndConnect(code)
+        source.removeExtra(PairCodeReceiver.EXTRA_PORT)
+        appendLog("Código recebido pela notificação. Porta descoberta previamente: $pairingPort.")
+        pairAndConnect(code, pairingPort)
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -85,11 +87,28 @@ class MainActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
             return
         }
-        showPairingNotification()
-        appendLog("Notificação enviada ao painel superior. Abra a tela “Parear dispositivo com código” do Android e responda à notificação com os 6 dígitos.")
+        appendLog("Iniciando descoberta mDNS do Shizuku: procurando primeiro a porta de pareamento…")
+        pairButton.isEnabled = false
+        thread {
+            try {
+                val endpoint = discoverAdbEndpoint("_adb-tls-pairing._tcp.")
+                val pairingPort = endpoint.second
+                appendFromWorker("Porta de pareamento identificada: $pairingPort. Preparando notificação com essa porta.")
+                runOnUiThread {
+                    showPairingNotification(pairingPort)
+                    appendLog("Serviço ADB encontrado. Digite os 6 dígitos na notificação e toque em ENVIAR CÓDIGO.")
+                    pairButton.isEnabled = true
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    appendLog("NÃO FOI POSSÍVEL DESCOBRIR A PORTA DE PAREAMENTO: ${e.message}")
+                    pairButton.isEnabled = true
+                }
+            }
+        }
     }
 
-    private fun showPairingNotification() {
+    private fun showPairingNotification(pairingPort: Int) {
         val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) {
             manager.createNotificationChannel(
@@ -102,7 +121,7 @@ class MainActivity : Activity() {
         val remoteInput = RemoteInput.Builder(PairCodeReceiver.KEY_CODE)
             .setLabel("Digite o código de 6 dígitos")
             .build()
-        val receiverIntent = Intent(this, PairCodeReceiver::class.java).setPackage(packageName)
+        val receiverIntent = Intent(this, PairCodeReceiver::class.java).setPackage(packageName).putExtra(PairCodeReceiver.EXTRA_PORT, pairingPort)
         val pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT or
             (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
         val replyPendingIntent = PendingIntent.getBroadcast(this, 120, receiverIntent, pendingFlags)
@@ -209,24 +228,22 @@ class MainActivity : Activity() {
         updateChoices()
     }
 
-    private fun pairAndConnect(code: String) {
+    private fun pairAndConnect(code: String, pairingPort: Int) {
         if (busy) return
-        if (!code.matches(Regex("\\d{6}"))) {
-            appendLog("Informe o código de pareamento de 6 dígitos mostrado pelo Android.")
+        if (!code.matches(Regex("\\d{6}")) || pairingPort !in 1..65535) {
+            appendLog("Código ou porta de pareamento inválidos. Toque em LIBERAR ACESSO para redescobrir o serviço.")
             return
         }
         setBusy(true)
         appendLog("Iniciando descoberta mDNS do serviço ADB de pareamento…")
         thread {
             try {
-                appendFromWorker("Procurando serviço de pareamento ADB na rede local…")
-                val pairEndpoint = discoverAdbEndpoint("_adb-tls-pairing._tcp.")
-                appendFromWorker("Porta de pareamento encontrada em ${pairEndpoint.first}:${pairEndpoint.second}. Realizando handshake TLS…")
-                runBlocking { Kadb.pair(pairEndpoint.first, pairEndpoint.second, code) }
+                appendFromWorker("Usando a porta mDNS guardada na notificação: $pairingPort. Conectando pelo loopback 127.0.0.1 como no Shizuku…")
+                runBlocking { Kadb.pair("127.0.0.1", pairingPort, code) }
                 appendFromWorker("Pareamento aceito. Procurando a porta segura de conexão…")
                 val connectEndpoint = discoverAdbEndpoint("_adb-tls-connect._tcp.")
-                appendFromWorker("Serviço de conexão encontrado em ${connectEndpoint.first}:${connectEndpoint.second}. Conectando…")
-                val connection = Kadb.create(connectEndpoint.first, connectEndpoint.second)
+                appendFromWorker("Serviço de conexão identificado em ${connectEndpoint.first}:${connectEndpoint.second}. Abrindo sessão local…")
+                val connection = Kadb.create("127.0.0.1", connectEndpoint.second)
                 val check = connection.shell("echo ATOMIC_ADB_OK")
                 if (check.exitCode != 0 || !check.allOutput.contains("ATOMIC_ADB_OK")) {
                     connection.close()
@@ -557,6 +574,7 @@ class PairCodeReceiver : BroadcastReceiver() {
         if (!code.matches(Regex("\\d{6}"))) return
         val launch = Intent(context, MainActivity::class.java).apply {
             putExtra(EXTRA_CODE, code)
+            putExtra(EXTRA_PORT, intent.getIntExtra(EXTRA_PORT, -1))
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
         context.startActivity(launch)
@@ -565,5 +583,6 @@ class PairCodeReceiver : BroadcastReceiver() {
     companion object {
         const val KEY_CODE = "atomic_pairing_code"
         const val EXTRA_CODE = "atomic_pairing_code_extra"
+        const val EXTRA_PORT = "atomic_pairing_port_extra"
     }
 }
