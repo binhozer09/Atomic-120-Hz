@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicReference
 import android.text.InputType
 import com.flyfishxu.kadb.Kadb
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlin.concurrent.thread
 
 class MainActivity : Activity() {
@@ -244,7 +245,7 @@ class MainActivity : Activity() {
         thread {
             try {
                 appendFromWorker("Pareando pelo endereço mDNS real do aparelho: $pairingHost:$pairingPort…")
-                runBlocking { Kadb.pair(pairingHost, pairingPort, code) }
+                runBlocking { withTimeout(20_000) { Kadb.pair(pairingHost, pairingPort, code) } }
                 appendFromWorker("Pareamento aceito. Procurando a porta segura de conexão…")
                 val connectEndpoint = discoverAdbEndpoint("_adb-tls-connect._tcp.")
                 appendFromWorker("Serviço de conexão identificado em ${connectEndpoint.first}:${connectEndpoint.second}. Abrindo sessão TLS…")
@@ -318,20 +319,22 @@ class MainActivity : Activity() {
 
             override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
                 val resolvedAddress = serviceInfo.host
-                val host = resolvedAddress?.hostAddress
-                val localAddress = try {
-                    resolvedAddress != null && java.net.NetworkInterface.getNetworkInterfaces()
+                // Compare address bytes rather than InetAddress objects: IPv6 scope IDs can
+                // differ even when mDNS resolved the phone's own interface address.
+                val localHost = try {
+                    if (resolvedAddress == null) null
+                    else java.net.NetworkInterface.getNetworkInterfaces()
                         .asSequence()
                         .filter { it.isUp }
-                        .any { networkInterface ->
-                            networkInterface.inetAddresses.asSequence().any { it == resolvedAddress }
-                        }
-                } catch (_: Exception) { false }
-                // Keep the exact mDNS-resolved interface address; adbd may not bind loopback.
-                if (localAddress && !host.isNullOrBlank() && serviceInfo.port in 1..65535) {
-                    endpoint.set(host to serviceInfo.port)
+                        .flatMap { networkInterface -> networkInterface.inetAddresses.asSequence() }
+                        .firstOrNull { it.address.contentEquals(resolvedAddress.address) }
+                        ?.hostAddress
+                } catch (_: Exception) { null }
+                // Use the matching address from an active local interface, not a guessed IP.
+                if (!localHost.isNullOrBlank() && serviceInfo.port in 1..65535) {
+                    endpoint.set(localHost to serviceInfo.port)
                 } else {
-                    failure.set("Serviço mDNS resolvido, mas o endereço não corresponde a uma interface local ativa (host=$host, porta=${serviceInfo.port}).")
+                    failure.set("mDNS resolveu um endereço que não foi associado às interfaces locais ativas (resolvido=${resolvedAddress?.hostAddress}, porta=${serviceInfo.port}).")
                 }
                 latch.countDown()
             }
