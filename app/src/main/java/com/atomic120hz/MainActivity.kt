@@ -13,7 +13,10 @@ import android.widget.TextView
 import android.content.res.ColorStateList
 import android.text.InputType
 import com.flyfishxu.kadb.Kadb
+import com.flyfishxu.kadb.mdns.KadbMdnsAndroid
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlin.concurrent.thread
 
 class MainActivity : Activity() {
@@ -21,10 +24,7 @@ class MainActivity : Activity() {
     private var adbReady = false
     private var busy = false
     private var adb: Kadb? = null
-    private lateinit var hostInput: EditText
-    private lateinit var pairPortInput: EditText
     private lateinit var codeInput: EditText
-    private lateinit var connectPortInput: EditText
     private lateinit var logView: TextView
     private lateinit var pairButton: Button
     private lateinit var modeButton: Button
@@ -54,23 +54,26 @@ class MainActivity : Activity() {
         root.addView(label("⚛  ATOMIC 120 Hz", 27f, 0xFF55C9FF.toInt(), true), match())
         root.addView(label("ATOMIC ACCESS • ADB INTEGRADO", 12f, 0xFF9ABBD5.toInt()), match())
         root.addView(space(18))
-        root.addView(label("PAREAMENTO ADB SEM FIO", 16f, Color.WHITE, true), match())
-        root.addView(label("Ative Opções do desenvolvedor e Depuração sem fio. Na tela “Parear dispositivo com código”, use os dados exibidos abaixo.", 13f, 0xFF9ABBD5.toInt()), match())
-        hostInput = field("IP do próprio aparelho (normalmente 127.0.0.1)", "127.0.0.1", InputType.TYPE_CLASS_TEXT)
-        pairPortInput = field("Porta de pareamento", "", InputType.TYPE_CLASS_NUMBER)
-        codeInput = field("Código de pareamento (6 dígitos)", "", InputType.TYPE_CLASS_NUMBER)
-        connectPortInput = field("Porta de conexão ADB", "", InputType.TYPE_CLASS_NUMBER)
-        root.addView(hostInput, match())
-        root.addView(pairPortInput, match())
+        root.addView(label("PAREAMENTO AUTOMÁTICO", 16f, Color.WHITE, true), match())
+        root.addView(label("1. Ative Opções do desenvolvedor e Depuração sem fio.\n2. Abra “Parear dispositivo com código”.\n3. Digite aqui o código de 6 dígitos. O Atomic detecta as portas automaticamente.", 13f, 0xFF9ABBD5.toInt()), match())
+        codeInput = EditText(this).apply {
+            hint = "Código de pareamento (6 dígitos)"
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setTextColor(Color.WHITE)
+            setHintTextColor(0xFF7894AD.toInt())
+            textSize = 18f
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            backgroundTintList = ColorStateList.valueOf(0xFF55C9FF.toInt())
+        }
         root.addView(codeInput, match())
-        root.addView(connectPortInput, match())
         root.addView(space(8))
         pairButton = Button(this).apply {
-            text = "PAREAR E CONECTAR ATOMIC"
+            text = "LIBERAR ACESSO"
             isAllCaps = false
             setOnClickListener { pairAndConnect() }
         }
-        root.addView(pairButton, LinearLayout.LayoutParams(-1, dp(56)))
+        root.addView(pairButton, LinearLayout.LayoutParams(-1, dp(58)))
         root.addView(space(18))
         root.addView(label("FREQUÊNCIA DESEJADA", 14f, 0xFF55C9FF.toInt(), true), match())
         val choices = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -80,16 +83,16 @@ class MainActivity : Activity() {
         choices.addView(hz120, LinearLayout.LayoutParams(0, dp(50), 1f))
         root.addView(choices, match())
         modeButton = Button(this).apply {
-            text = "LIBERAR ACESSO"
+            text = "ATIVAR MODO"
             isAllCaps = false
             isEnabled = false
             setOnClickListener { applyRefreshRate() }
         }
-        root.addView(modeButton, LinearLayout.LayoutParams(-1, dp(64)))
+        root.addView(modeButton, LinearLayout.LayoutParams(-1, dp(62)))
         root.addView(space(12))
         root.addView(label("TERMINAL DE EXECUÇÃO", 14f, 0xFF55C9FF.toInt(), true), match())
         logView = TextView(this).apply {
-            text = "Aguardando pareamento. Nenhum comando foi executado ainda."
+            text = "Aguardando autorização ADB. Nenhum comando foi executado."
             textSize = 12f
             setTextColor(0xFFD2E8F8.toInt())
             setPadding(dp(12), dp(12), dp(12), dp(12))
@@ -102,33 +105,43 @@ class MainActivity : Activity() {
 
     private fun pairAndConnect() {
         if (busy) return
-        val host = hostInput.text.toString().trim()
-        val pairPort = pairPortInput.text.toString().toIntOrNull()
         val code = codeInput.text.toString().trim()
-        val connectPort = connectPortInput.text.toString().toIntOrNull()
-        if (host.isBlank() || pairPort !in 1..65535 || connectPort !in 1..65535 || !code.matches(Regex("\\d{6}"))) {
-            appendLog("ERRO: informe IP, porta de pareamento, código de 6 dígitos e porta de conexão.")
+        if (!code.matches(Regex("\\d{6}"))) {
+            appendLog("Informe o código de pareamento de 6 dígitos mostrado pelo Android.")
             return
         }
         setBusy(true)
-        appendLog("Iniciando pareamento TLS ADB…")
+        appendLog("Iniciando descoberta mDNS do serviço ADB de pareamento…")
         thread {
+            val discovery = KadbMdnsAndroid(applicationContext)
             try {
-                runBlocking { Kadb.pair(host, pairPort!!, code) }
-                runOnUiThread { appendLog("Pareamento concluído. Abrindo conexão ADB…") }
-                val connection = Kadb.create(host, connectPort!!)
+                discovery.start()
+                val pairEndpoint = runBlocking {
+                    withTimeout(45_000) {
+                        discovery.state.first { it.pairDevices.isNotEmpty() }.pairDevices.first()
+                    }
+                }
+                runOnUiThread { appendLog("Porta de pareamento encontrada automaticamente. Realizando handshake TLS…") }
+                runBlocking { Kadb.pair(pairEndpoint.host, pairEndpoint.port, code) }
+                runOnUiThread { appendLog("Pareamento aceito. Procurando a porta segura de conexão…") }
+                val connectEndpoint = runBlocking {
+                    withTimeout(45_000) {
+                        discovery.state.first { it.connectDevices.isNotEmpty() }.connectDevices.first()
+                    }
+                }
+                val connection = Kadb.create(connectEndpoint.host, connectEndpoint.port)
                 val check = connection.shell("echo ATOMIC_ADB_OK")
                 if (check.exitCode != 0 || !check.allOutput.contains("ATOMIC_ADB_OK")) {
                     connection.close()
-                    throw IllegalStateException("A conexão ADB não confirmou o teste de shell: ${check.allOutput}")
+                    throw IllegalStateException("A conexão não confirmou o teste de shell: ${check.allOutput}")
                 }
                 adb?.close()
                 adb = connection
                 adbReady = true
                 runOnUiThread {
-                    appendLog("SUCESSO REAL: conexão ADB autorizada e comando de teste confirmado. UID shell ativo.")
-                    modeButton.isEnabled = true
+                    appendLog("CONEXÃO CONFIRMADA: pareamento TLS concluído e teste de shell retornou ATOMIC_ADB_OK.")
                     pairButton.text = "ADB CONECTADO"
+                    modeButton.isEnabled = true
                     setBusy(false)
                 }
             } catch (e: Exception) {
@@ -138,6 +151,8 @@ class MainActivity : Activity() {
                     appendLog("FALHA REAL NO PAREAMENTO/CONEXÃO: ${e.message ?: e.javaClass.simpleName}")
                     setBusy(false)
                 }
+            } finally {
+                discovery.close()
             }
         }
     }
@@ -158,7 +173,7 @@ class MainActivity : Activity() {
                     prefs.edit().putString("peak", peak).putString("min", min).apply()
                 }
                 val hz = selectedHz
-                runOnUiThread { appendLog("Aplicando solicitação de ${hz} Hz pelo ADB autorizado…") }
+                runOnUiThread { appendLog("Executando comandos ADB autorizados para solicitar ${hz} Hz…") }
                 val result = connection.shell("settings put system peak_refresh_rate $hz && settings put system min_refresh_rate $hz")
                 if (result.exitCode != 0) throw IllegalStateException(result.allOutput)
                 val peakAfter = connection.shell("settings get system peak_refresh_rate").allOutput.trim()
@@ -167,14 +182,14 @@ class MainActivity : Activity() {
                     throw IllegalStateException("O sistema não confirmou os valores. peak=$peakAfter; min=$minAfter")
                 }
                 runOnUiThread {
-                    appendLog("COMANDO CONFIRMADO: peak_refresh_rate=$peakAfter; min_refresh_rate=$minAfter. Isso confirma a gravação, não garante FPS do jogo.")
+                    appendLog("VALORES CONFIRMADOS PELO ANDROID: peak=$peakAfter; min=$minAfter. Isso não garante 90 FPS dentro de um jogo.")
                     modeButton.text = "RESTAURAR CONFIGURAÇÕES"
                     modeButton.setOnClickListener { restoreRefreshRate() }
                     setBusy(false)
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    appendLog("SISTEMA RECUSOU OU NÃO CONFIRMOU: ${e.message ?: e.javaClass.simpleName}")
+                    appendLog("O SISTEMA RECUSOU OU NÃO CONFIRMOU A ALTERAÇÃO: ${e.message ?: e.javaClass.simpleName}")
                     setBusy(false)
                 }
             }
@@ -200,8 +215,8 @@ class MainActivity : Activity() {
                 restore("min_refresh_rate", oldMin)
                 prefs.edit().clear().apply()
                 runOnUiThread {
-                    appendLog("Configurações anteriores restauradas: peak=$oldPeak; min=$oldMin.")
-                    modeButton.text = "LIBERAR ACESSO"
+                    appendLog("CONFIGURAÇÕES ANTERIORES RESTAURADAS: peak=$oldPeak; min=$oldMin.")
+                    modeButton.text = "ATIVAR MODO"
                     modeButton.setOnClickListener { applyRefreshRate() }
                     setBusy(false)
                 }
@@ -227,17 +242,6 @@ class MainActivity : Activity() {
     private fun updateChoices() {
         hz90.alpha = if (selectedHz == 90) 1f else .55f
         hz120.alpha = if (selectedHz == 120) 1f else .55f
-    }
-
-    private fun field(hintText: String, value: String, type: Int) = EditText(this).apply {
-        hint = hintText
-        setText(value)
-        inputType = type
-        textSize = 14f
-        setTextColor(Color.WHITE)
-        setHintTextColor(0xFF7894AD.toInt())
-        setPadding(dp(12), dp(8), dp(12), dp(8))
-        backgroundTintList = ColorStateList.valueOf(0xFF55C9FF.toInt())
     }
 
     private fun label(value: String, size: Float, color: Int, bold: Boolean = false) = TextView(this).apply {
