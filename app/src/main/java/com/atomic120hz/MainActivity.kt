@@ -10,6 +10,8 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.content.res.ColorStateList
 import android.graphics.Color
+import android.content.pm.PackageManager
+import rikka.shizuku.Shizuku
 
 class MainActivity : Activity() {
     private var selectedHz = 90f
@@ -19,16 +21,32 @@ class MainActivity : Activity() {
     private lateinit var toggle: Button
     private lateinit var hz90: Button
     private lateinit var hz120: Button
+    private lateinit var shizukuButton: Button
+    private val shizukuRequestCode = 12090
+    private val shizukuPermissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+        if (requestCode == shizukuRequestCode) {
+            runOnUiThread {
+                if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                    status.text = "Atomic Access autorizado pelo Shizuku. Agora você pode tentar ativar o modo selecionado."
+                    shizukuButton.text = "SHIZUKU AUTORIZADO"
+                } else {
+                    status.text = "Autorização do Shizuku negada. Você pode solicitar novamente."
+                }
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = Color.rgb(5, 15, 29)
         window.navigationBarColor = Color.rgb(5, 15, 29)
+        Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
         buildUi()
         refreshDisplayInfo()
+        updateShizukuStatus()
     }
 
-    private fun buildUi() {
+    override fun onDestroy() {\n        Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)\n        super.onDestroy()\n    }\n\n    private fun buildUi() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
@@ -92,14 +110,12 @@ class MainActivity : Activity() {
         }, match())
         root.addView(space(8))
         root.addView(TextView(this).apply {
-            text = "O Android bloqueia aplicativos comuns de alterar globalmente os limites de Hz em alguns aparelhos. O Atomic aplica o modo compatível somente à própria tela; não precisa pedir uma autorização que não resolveria esse bloqueio."
+            text = "Conecte o Shizuku para autorizar operações avançadas do Android. O serviço precisa estar iniciado no próprio aparelho (por depuração sem fio ou root)."
             textSize = 13f
             gravity = Gravity.CENTER
             setTextColor(0xFF9ABBD5.toInt())
         }, match())
-        root.addView(space(18))
-        root.addView(TextView(this).apply {
-            text = "Importante: a frequência da tela não desbloqueia o limite interno de FPS de jogos como Free Fire."
+        shizukuButton = Button(this).apply {\n            text = "CONECTAR SHIZUKU"\n            isAllCaps = false\n            setOnClickListener { connectShizuku() }\n        }\n        root.addView(shizukuButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(54)))\n        root.addView(space(18))\n        root.addView(TextView(this).apply {\n            text = "O Shizuku não remove limites internos de FPS do jogo. Ele permite apenas operações que o Android autoriza ao serviço ADB/root."
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(0xFF7894AD.toInt())
@@ -108,7 +124,67 @@ class MainActivity : Activity() {
         updateButtons()
     }
 
+    private fun connectShizuku() {
+        try {
+            if (!Shizuku.pingBinder()) {
+                val launch = packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
+                if (launch != null) startActivity(launch)
+                else startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://shizuku.rikka.app/download/")))
+                status.text = "Abra o Shizuku, inicie o serviço por Depuração sem fio e volte ao Atomic."
+                return
+            }
+            if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
+                updateShizukuStatus()
+            } else {
+                Shizuku.requestPermission(shizukuRequestCode)
+            }
+        } catch (e: Exception) {
+            status.text = "Não foi possível conectar ao Shizuku: ${e.message}"
+        }
+    }
+
+    private fun updateShizukuStatus() {
+        try {
+            val active = Shizuku.pingBinder()
+            val granted = active && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+            shizukuButton.text = when {
+                granted -> "SHIZUKU AUTORIZADO"
+                active -> "AUTORIZAR ATOMIC NO SHIZUKU"
+                else -> "CONECTAR SHIZUKU"
+            }
+            if (granted) status.text = "Shizuku conectado e autorizado."
+            else if (!active) status.text = "Shizuku não está iniciado. Inicie-o por Depuração sem fio e volte aqui."
+        } catch (_: Exception) {
+            shizukuButton.text = "CONECTAR SHIZUKU"
+        }
+    }
+
+    private fun runShizukuCommand(command: String, onResult: (Boolean, String) -> Unit) {
+        Thread {
+            try {
+                val process = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
+                val output = process.inputStream.bufferedReader().use { it.readText() }
+                val error = process.errorStream.bufferedReader().use { it.readText() }
+                val exit = process.waitFor()
+                runOnUiThread { onResult(exit == 0, (output + "\\n" + error).trim()) }
+            } catch (e: Exception) {
+                runOnUiThread { onResult(false, e.message ?: "Falha ao executar comando Shizuku") }
+            }
+        }.start()
+    }
+
     private fun enableMode() {
+        try {
+            if (!Shizuku.pingBinder() || Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+                status.text = "Conecte e autorize o Shizuku antes de ativar o modo global."
+                connectShizuku()
+                return
+            }
+        } catch (_: Exception) {
+            status.text = "Shizuku indisponível. Inicie o serviço e autorize o Atomic."
+            return
+        }
+
         val mode = window.decorView.display?.supportedModes
             ?.filter { kotlin.math.abs(it.refreshRate - selectedHz) < 2f }
             ?.maxByOrNull { it.refreshRate }
@@ -120,14 +196,23 @@ class MainActivity : Activity() {
             return
         }
 
-        val params = window.attributes
-        params.preferredDisplayModeId = mode.modeId
-        window.attributes = params
-        enabled = true
-        toggle.text = "LIGADO"
-        toggle.backgroundTintList = ColorStateList.valueOf(0xFF087A58.toInt())
-        status.text = "Solicitado ${mode.refreshRate.toInt()} Hz para a tela do Atomic. Isso não altera a frequência de outros aplicativos."
-        refreshDisplayInfo()
+        val command = "settings put system peak_refresh_rate ${selectedHz.toInt()} && settings put system min_refresh_rate ${selectedHz.toInt()} && settings get system peak_refresh_rate && settings get system min_refresh_rate"
+        status.text = "Aplicando ${selectedHz.toInt()} Hz pelo Shizuku..."
+        runShizukuCommand(command) { ok, output ->
+            if (ok) {
+                val params = window.attributes
+                params.preferredDisplayModeId = mode.modeId
+                window.attributes = params
+                enabled = true
+                toggle.text = "LIGADO"
+                toggle.backgroundTintList = ColorStateList.valueOf(0xFF087A58.toInt())
+                status.text = "Comando aceito pelo Shizuku. Retorno: ${output.ifBlank { "sem saída" }}. Confirme a frequência real no aparelho."
+                refreshDisplayInfo()
+            } else {
+                enabled = false
+                status.text = "O Shizuku executou a tentativa, mas o sistema recusou a alteração: ${output}"
+            }
+        }
     }
 
     private fun disableMode() {
@@ -137,8 +222,20 @@ class MainActivity : Activity() {
         enabled = false
         toggle.text = "DESLIGADO"
         toggle.backgroundTintList = ColorStateList.valueOf(0xFF174568.toInt())
-        status.text = "Preferência de frequência removida da tela do Atomic."
-        refreshDisplayInfo()
+        try {
+            if (Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
+                runShizukuCommand("settings delete system min_refresh_rate; settings delete system peak_refresh_rate") { _, output ->
+                    status.text = "Preferências globais removidas. ${output}"
+                    refreshDisplayInfo()
+                }
+            } else {
+                status.text = "Preferência local removida. Shizuku não está autorizado para restaurar os limites globais."
+                refreshDisplayInfo()
+            }
+        } catch (_: Exception) {
+            status.text = "Preferência local removida."
+            refreshDisplayInfo()
+        }
     }
 
     private fun choose(hz: Float) {
