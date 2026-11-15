@@ -22,5 +22,6 @@ android {
 
 dependencies {
     // ADB client próprio do Atomic: pareamento TLS e shell sem depender do app Shizuku.
+    // Kadb 1.2.1 mantém compatibilidade com compileSdk 35 / AGP 8.7.x.
     implementation("com.flyfishxu:kadb:1.2.1")
 }
