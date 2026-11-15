@@ -24,6 +24,7 @@ import android.widget.TextView
 import android.content.res.ColorStateList
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.net.wifi.WifiManager
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -266,60 +267,88 @@ class MainActivity : Activity() {
      * Descobre serviços ADB Wireless Debugging usando o NSD nativo do Android.
      * Assim o app não depende de um artefato mDNS externo.
      */
+
     @Suppress("DEPRECATION")
     private fun discoverAdbEndpoint(serviceType: String): Pair<String, Int> {
         val nsd = getSystemService(NSD_SERVICE) as NsdManager
+        val wifi = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
+        val multicastLock = wifi.createMulticastLock("Atomic120Hz:adb-mdns").apply {
+            setReferenceCounted(false)
+            acquire()
+        }
         val latch = CountDownLatch(1)
         val endpoint = AtomicReference<Pair<String, Int>?>(null)
         val failure = AtomicReference<String?>(null)
         val resolving = java.util.concurrent.atomic.AtomicBoolean(false)
 
+        fun normalizedType(value: String): String =
+            value.trim().lowercase(java.util.Locale.ROOT)
+                .removeSuffix(".local.")
+                .removeSuffix(".local")
+                .trimEnd('.')
+
+        val expectedType = normalizedType(serviceType)
         val resolveListener = object : NsdManager.ResolveListener {
             override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
-                failure.set("Falha ao resolver serviço ADB (código $errorCode).")
+                failure.set("Falha ao resolver serviço " + serviceInfo.serviceName + " (código " + errorCode + ").")
                 latch.countDown()
             }
 
             override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
                 val host = serviceInfo.host?.hostAddress
-                if (!host.isNullOrBlank() && serviceInfo.port > 0) {
+                if (!host.isNullOrBlank() && serviceInfo.port in 1..65535) {
                     endpoint.set(host to serviceInfo.port)
                 } else {
-                    failure.set("O Android encontrou o serviço, mas não informou host/porta válidos.")
+                    failure.set("Serviço encontrado, mas o Android não informou IP/porta válidos.")
                 }
                 latch.countDown()
             }
         }
 
         val discoveryListener = object : NsdManager.DiscoveryListener {
-            override fun onDiscoveryStarted(regType: String) {}
+            override fun onDiscoveryStarted(regType: String) {
+                appendFromWorker("mDNS iniciado para " + serviceType + ".")
+            }
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-                val foundType = serviceInfo.serviceType.trimEnd('.')
-                val expectedType = serviceType.trimEnd('.')
-                if (foundType.equals(expectedType, ignoreCase = true) &&
-                    resolving.compareAndSet(false, true)) {
-                    nsd.resolveService(serviceInfo, resolveListener)
+                val foundType = normalizedType(serviceInfo.serviceType ?: "")
+                appendFromWorker("Serviço de rede encontrado: " + serviceInfo.serviceName + " (" + serviceInfo.serviceType + ").")
+                if (foundType == expectedType && resolving.compareAndSet(false, true)) {
+                    appendFromWorker("Serviço ADB correspondente localizado. Resolvendo endereço IP e porta…")
+                    try {
+                        nsd.resolveService(serviceInfo, resolveListener)
+                    } catch (e: Exception) {
+                        failure.set("Não foi possível resolver o serviço mDNS: " + e.message)
+                        latch.countDown()
+                    }
                 }
             }
-            override fun onServiceLost(serviceInfo: NsdServiceInfo) {}
-            override fun onDiscoveryStopped(serviceType: String) {}
-            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
-                failure.set("Falha ao iniciar descoberta mDNS (código $errorCode).")
-                latch.countDown()
+            override fun onServiceLost(serviceInfo: NsdServiceInfo) {
+                appendFromWorker("Serviço mDNS saiu da rede: " + serviceInfo.serviceName + ".")
             }
-            override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
-                failure.compareAndSet(null, "Falha ao encerrar descoberta mDNS (código $errorCode).")
+            override fun onDiscoveryStopped(regType: String) {}
+            override fun onStartDiscoveryFailed(regType: String, errorCode: Int) {
+                failure.set("Falha ao iniciar descoberta mDNS (código " + errorCode + "). Verifique a Depuração sem fio e a rede Wi-Fi.")
+                latch.countDown()
+                try { nsd.stopServiceDiscovery(this) } catch (_: Exception) {}
+            }
+            override fun onStopDiscoveryFailed(regType: String, errorCode: Int) {
+                failure.compareAndSet(null, "Falha ao encerrar descoberta mDNS (código " + errorCode + ").")
             }
         }
 
-        nsd.discoverServices(serviceType, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
         try {
-            if (!latch.await(45, TimeUnit.SECONDS)) {
-                throw IllegalStateException("Tempo esgotado procurando $serviceType. Confirme que a tela de pareamento/depuração sem fio está aberta.")
+            appendFromWorker("Ativando recepção multicast para localizar a porta ADB automaticamente…")
+            nsd.discoverServices(serviceType, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
+            if (!latch.await(25, TimeUnit.SECONDS)) {
+                throw IllegalStateException("Tempo esgotado procurando " + serviceType + ". Nenhum endpoint foi resolvido. Confirme que a tela 'Parear dispositivo com código' continua aberta e que o Wi-Fi está ativo.")
             }
-            return endpoint.get() ?: throw IllegalStateException(failure.get() ?: "Nenhum endpoint ADB foi encontrado.")
+            val result = endpoint.get()
+                ?: throw IllegalStateException(failure.get() ?: "Nenhum serviço ADB compatível foi encontrado por mDNS.")
+            appendFromWorker("Endpoint ADB detectado: " + result.first + ":" + result.second + ".")
+            return result
         } finally {
             try { nsd.stopServiceDiscovery(discoveryListener) } catch (_: Exception) {}
+            try { if (multicastLock.isHeld) multicastLock.release() } catch (_: Exception) {}
         }
     }
 
