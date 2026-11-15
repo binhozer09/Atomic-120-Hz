@@ -198,45 +198,6 @@ class MainActivity : Activity() {
         status.text = "Selecionado: " + hz.toInt() + " Hz. Toque em LIGAR para solicitar ao Android."
     }
 
-    private fun enableMode() {
-        val mode = findMode(selectedHz)
-        if (mode == null) {
-            status.text = "Este aparelho não informou um modo de " + selectedHz.toInt() + " Hz. Nada foi alterado."
-            return
-        }
-        window.attributes = window.attributes.apply {
-            preferredDisplayModeId = mode.modeId
-            preferredRefreshRate = selectedHz
-        }
-        enabled = true
-        toggle.text = "LIGADO"
-        toggle.backgroundTintList = ColorStateList.valueOf(0xFF087A58.toInt())
-        status.text = "Solicitação enviada. Verificando a resposta do sistema…"
-        window.decorView.postDelayed({ verifyApplied() }, 1200)
-    }
-
-    private fun verifyApplied() {
-        val actual = window.decorView.display?.refreshRate
-        if (actual != null && abs(actual - selectedHz) < 2f) {
-            status.text = "Confirmado: o Android reporta " + actual.toInt() + " Hz nesta tela."
-        } else {
-            status.text = "Não confirmado. O sistema reporta " + (actual?.toInt()?.toString() ?: "valor indisponível") + " Hz."
-        }
-        refreshDisplayInfo()
-    }
-
-    private fun disableMode() {
-        window.attributes = window.attributes.apply {
-            preferredDisplayModeId = 0
-            preferredRefreshRate = 0f
-        }
-        enabled = false
-        toggle.text = "DESLIGADO"
-        toggle.backgroundTintList = ColorStateList.valueOf(0xFF174568.toInt())
-        status.text = "Solicitação removida. O Android voltou a escolher a frequência desta janela."
-        refreshDisplayInfo()
-    }
-
     private fun findMode(hz: Float): android.view.Display.Mode? {
         return window.decorView.display?.supportedModes
             ?.filter { abs(it.refreshRate - hz) < 2f }
