@@ -2,52 +2,45 @@ package com.atomic120hz
 
 import android.app.Activity
 import android.os.Bundle
+import android.graphics.Color
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.content.res.ColorStateList
-import android.graphics.Color
-import android.content.pm.PackageManager
-import rikka.shizuku.Shizuku
+import android.text.InputType
+import com.flyfishxu.kadb.Kadb
+import kotlinx.coroutines.runBlocking
+import kotlin.concurrent.thread
 
 class MainActivity : Activity() {
-    private var selectedHz = 90f
-    private var enabled = false
-    private lateinit var status: TextView
-    private lateinit var detected: TextView
-    private lateinit var toggle: Button
+    private var selectedHz = 90
+    private var adbReady = false
+    private var busy = false
+    private var adb: Kadb? = null
+    private lateinit var hostInput: EditText
+    private lateinit var pairPortInput: EditText
+    private lateinit var codeInput: EditText
+    private lateinit var connectPortInput: EditText
+    private lateinit var logView: TextView
+    private lateinit var pairButton: Button
+    private lateinit var modeButton: Button
     private lateinit var hz90: Button
     private lateinit var hz120: Button
-    private lateinit var shizukuButton: Button
-    private val shizukuRequestCode = 12090
-    private val shizukuPermissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
-        if (requestCode == shizukuRequestCode) {
-            runOnUiThread {
-                if (grantResult == PackageManager.PERMISSION_GRANTED) {
-                    status.text = "Atomic Access autorizado pelo Shizuku. Agora você pode tentar ativar o modo selecionado."
-                    shizukuButton.text = "SHIZUKU AUTORIZADO"
-                } else {
-                    status.text = "Autorização do Shizuku negada. Você pode solicitar novamente."
-                }
-            }
-        }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = Color.rgb(5, 15, 29)
         window.navigationBarColor = Color.rgb(5, 15, 29)
-        Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
         buildUi()
-        refreshDisplayInfo()
-        updateShizukuStatus()
     }
 
     override fun onDestroy() {
-        Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
+        adb?.close()
+        adb = null
         super.onDestroy()
     }
 
@@ -55,236 +48,207 @@ class MainActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(22), dp(28), dp(22), dp(20))
+            setPadding(dp(20), dp(24), dp(20), dp(20))
             setBackgroundColor(Color.rgb(5, 15, 29))
         }
-        root.addView(TextView(this).apply {
-            text = "⚛  ATOMIC"
-            textSize = 29f
-            setTextColor(0xFF55C9FF.toInt())
-            gravity = Gravity.CENTER
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-        }, match())
-        root.addView(TextView(this).apply {
-            text = "120 Hz  •  GAME PERFORMANCE"
+        root.addView(label("⚛  ATOMIC 120 Hz", 27f, 0xFF55C9FF.toInt(), true), match())
+        root.addView(label("ATOMIC ACCESS • ADB INTEGRADO", 12f, 0xFF9ABBD5.toInt()), match())
+        root.addView(space(18))
+        root.addView(label("PAREAMENTO ADB SEM FIO", 16f, Color.WHITE, true), match())
+        root.addView(label("Ative Opções do desenvolvedor e Depuração sem fio. Na tela “Parear dispositivo com código”, use os dados exibidos abaixo.", 13f, 0xFF9ABBD5.toInt()), match())
+        hostInput = field("IP do próprio aparelho (normalmente 127.0.0.1)", "127.0.0.1", InputType.TYPE_CLASS_TEXT)
+        pairPortInput = field("Porta de pareamento", "", InputType.TYPE_CLASS_NUMBER)
+        codeInput = field("Código de pareamento (6 dígitos)", "", InputType.TYPE_CLASS_NUMBER)
+        connectPortInput = field("Porta de conexão ADB", "", InputType.TYPE_CLASS_NUMBER)
+        root.addView(hostInput, match())
+        root.addView(pairPortInput, match())
+        root.addView(codeInput, match())
+        root.addView(connectPortInput, match())
+        root.addView(space(8))
+        pairButton = Button(this).apply {
+            text = "PAREAR E CONECTAR ATOMIC"
+            isAllCaps = false
+            setOnClickListener { pairAndConnect() }
+        }
+        root.addView(pairButton, LinearLayout.LayoutParams(-1, dp(56)))
+        root.addView(space(18))
+        root.addView(label("FREQUÊNCIA DESEJADA", 14f, 0xFF55C9FF.toInt(), true), match())
+        val choices = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        hz90 = Button(this).apply { text = "90 Hz"; isAllCaps = false; setOnClickListener { selectedHz = 90; updateChoices() } }
+        hz120 = Button(this).apply { text = "120 Hz"; isAllCaps = false; setOnClickListener { selectedHz = 120; updateChoices() } }
+        choices.addView(hz90, LinearLayout.LayoutParams(0, dp(50), 1f))
+        choices.addView(hz120, LinearLayout.LayoutParams(0, dp(50), 1f))
+        root.addView(choices, match())
+        modeButton = Button(this).apply {
+            text = "LIBERAR ACESSO"
+            isAllCaps = false
+            isEnabled = false
+            setOnClickListener { applyRefreshRate() }
+        }
+        root.addView(modeButton, LinearLayout.LayoutParams(-1, dp(64)))
+        root.addView(space(12))
+        root.addView(label("TERMINAL DE EXECUÇÃO", 14f, 0xFF55C9FF.toInt(), true), match())
+        logView = TextView(this).apply {
+            text = "Aguardando pareamento. Nenhum comando foi executado ainda."
             textSize = 12f
-            letterSpacing = .16f
-            setTextColor(0xFF9ABBD5.toInt())
-            gravity = Gravity.CENTER
-        }, match())
-        root.addView(space(28))
-        detected = TextView(this).apply {
-            textSize = 18f
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            setPadding(dp(12), dp(18), dp(12), dp(18))
+            setTextColor(0xFFD2E8F8.toInt())
+            setPadding(dp(12), dp(12), dp(12), dp(12))
             setBackgroundColor(0xFF102943.toInt())
         }
-        root.addView(detected, match())
-        root.addView(space(24))
-        val choices = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
-        hz90 = choiceButton("90 Hz") { choose(90f) }
-        hz120 = choiceButton("120 Hz") { choose(120f) }
-        choices.addView(hz90, LinearLayout.LayoutParams(0, dp(52), 1f).apply { marginEnd = dp(7) })
-        choices.addView(hz120, LinearLayout.LayoutParams(0, dp(52), 1f).apply { marginStart = dp(7) })
-        root.addView(choices, match())
-        root.addView(space(18))
-        toggle = Button(this).apply {
-            text = "DESLIGADO"
-            textSize = 17f
-            isAllCaps = false
-            setTextColor(Color.WHITE)
-            backgroundTintList = ColorStateList.valueOf(0xFF174568.toInt())
-            setOnClickListener { if (enabled) disableMode() else enableMode() }
-        }
-        root.addView(toggle, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(76)))
-        root.addView(space(14))
-        status = TextView(this).apply {
-            textSize = 14f
-            gravity = Gravity.CENTER
-            setTextColor(0xFF9ABBD5.toInt())
-        }
-        root.addView(status, match())
-        root.addView(space(22))
-        root.addView(TextView(this).apply {
-            text = "ATOMIC ACCESS"
-            textSize = 17f
-            gravity = Gravity.CENTER
-            setTextColor(0xFF55C9FF.toInt())
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-        }, match())
-        root.addView(space(8))
-        root.addView(TextView(this).apply {
-            text = "Conecte o Shizuku para autorizar operações avançadas do Android. O serviço precisa estar iniciado no próprio aparelho (por depuração sem fio ou root)."
-            textSize = 13f
-            gravity = Gravity.CENTER
-            setTextColor(0xFF9ABBD5.toInt())
-        }, match())
-        shizukuButton = Button(this).apply {
-            text = "CONECTAR SHIZUKU"
-            isAllCaps = false
-            setOnClickListener { connectShizuku() }
-        }
-        root.addView(shizukuButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(54)))
-        root.addView(space(18))
-        root.addView(TextView(this).apply {
-            text = "O Shizuku não remove limites internos de FPS do jogo. Ele permite apenas operações que o Android autoriza ao serviço ADB/root."
-            textSize = 12f
-            gravity = Gravity.CENTER
-            setTextColor(0xFF7894AD.toInt())
-        }, match())
+        root.addView(logView, match())
         setContentView(ScrollView(this).apply { addView(root) })
-        updateButtons()
+        updateChoices()
     }
 
-    private fun connectShizuku() {
-        try {
-            if (!Shizuku.pingBinder()) {
-                val launch = packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
-                if (launch != null) startActivity(launch)
-                else startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://shizuku.rikka.app/download/")))
-                status.text = "Abra o Shizuku, inicie o serviço por Depuração sem fio e volte ao Atomic."
-                return
-            }
-            if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
-                updateShizukuStatus()
-            } else {
-                Shizuku.requestPermission(shizukuRequestCode)
-            }
-        } catch (e: Exception) {
-            status.text = "Não foi possível conectar ao Shizuku: ${e.message}"
+    private fun pairAndConnect() {
+        if (busy) return
+        val host = hostInput.text.toString().trim()
+        val pairPort = pairPortInput.text.toString().toIntOrNull()
+        val code = codeInput.text.toString().trim()
+        val connectPort = connectPortInput.text.toString().toIntOrNull()
+        if (host.isBlank() || pairPort !in 1..65535 || connectPort !in 1..65535 || !code.matches(Regex("\\d{6}"))) {
+            appendLog("ERRO: informe IP, porta de pareamento, código de 6 dígitos e porta de conexão.")
+            return
         }
-    }
-
-    private fun updateShizukuStatus() {
-        try {
-            val active = Shizuku.pingBinder()
-            val granted = active && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-            shizukuButton.text = when {
-                granted -> "SHIZUKU AUTORIZADO"
-                active -> "AUTORIZAR ATOMIC NO SHIZUKU"
-                else -> "CONECTAR SHIZUKU"
-            }
-            if (granted) status.text = "Shizuku conectado e autorizado."
-            else if (!active) status.text = "Shizuku não está iniciado. Inicie-o por Depuração sem fio e volte aqui."
-        } catch (_: Exception) {
-            shizukuButton.text = "CONECTAR SHIZUKU"
-        }
-    }
-
-    private fun runShizukuCommand(command: String, onResult: (Boolean, String) -> Unit) {
-        Thread {
+        setBusy(true)
+        appendLog("Iniciando pareamento TLS ADB…")
+        thread {
             try {
-                val process = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
-                val output = process.inputStream.bufferedReader().use { it.readText() }
-                val error = process.errorStream.bufferedReader().use { it.readText() }
-                val exit = process.waitFor()
-                runOnUiThread { onResult(exit == 0, (output + "\\n" + error).trim()) }
-            } catch (e: Exception) {
-                runOnUiThread { onResult(false, e.message ?: "Falha ao executar comando Shizuku") }
-            }
-        }.start()
-    }
-
-    private fun enableMode() {
-        try {
-            if (!Shizuku.pingBinder() || Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-                status.text = "Conecte e autorize o Shizuku antes de ativar o modo global."
-                connectShizuku()
-                return
-            }
-        } catch (_: Exception) {
-            status.text = "Shizuku indisponível. Inicie o serviço e autorize o Atomic."
-            return
-        }
-
-        val mode = window.decorView.display?.supportedModes
-            ?.filter { kotlin.math.abs(it.refreshRate - selectedHz) < 2f }
-            ?.maxByOrNull { it.refreshRate }
-
-        if (mode == null) {
-            enabled = false
-            toggle.text = "NÃO DISPONÍVEL"
-            status.text = "Este aparelho não informou um modo de ${selectedHz.toInt()} Hz compatível."
-            return
-        }
-
-        val command = "settings put system peak_refresh_rate ${selectedHz.toInt()} && settings put system min_refresh_rate ${selectedHz.toInt()} && settings get system peak_refresh_rate && settings get system min_refresh_rate"
-        status.text = "Aplicando ${selectedHz.toInt()} Hz pelo Shizuku..."
-        runShizukuCommand(command) { ok, output ->
-            if (ok) {
-                val params = window.attributes
-                params.preferredDisplayModeId = mode.modeId
-                window.attributes = params
-                enabled = true
-                toggle.text = "LIGADO"
-                toggle.backgroundTintList = ColorStateList.valueOf(0xFF087A58.toInt())
-                status.text = "Comando aceito pelo Shizuku. Retorno: ${output.ifBlank { "sem saída" }}. Confirme a frequência real no aparelho."
-                refreshDisplayInfo()
-            } else {
-                enabled = false
-                status.text = "O Shizuku executou a tentativa, mas o sistema recusou a alteração: ${output}"
-            }
-        }
-    }
-
-    private fun disableMode() {
-        val params = window.attributes
-        params.preferredDisplayModeId = 0
-        window.attributes = params
-        enabled = false
-        toggle.text = "DESLIGADO"
-        toggle.backgroundTintList = ColorStateList.valueOf(0xFF174568.toInt())
-        try {
-            if (Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
-                runShizukuCommand("settings delete system min_refresh_rate; settings delete system peak_refresh_rate") { _, output ->
-                    status.text = "Preferências globais removidas. ${output}"
-                    refreshDisplayInfo()
+                runBlocking { Kadb.pair(host, pairPort!!, code) }
+                runOnUiThread { appendLog("Pareamento concluído. Abrindo conexão ADB…") }
+                val connection = Kadb.create(host, connectPort!!)
+                val check = connection.shell("echo ATOMIC_ADB_OK")
+                if (check.exitCode != 0 || !check.allOutput.contains("ATOMIC_ADB_OK")) {
+                    connection.close()
+                    throw IllegalStateException("A conexão ADB não confirmou o teste de shell: ${check.allOutput}")
                 }
-            } else {
-                status.text = "Preferência local removida. Shizuku não está autorizado para restaurar os limites globais."
-                refreshDisplayInfo()
+                adb?.close()
+                adb = connection
+                adbReady = true
+                runOnUiThread {
+                    appendLog("SUCESSO REAL: conexão ADB autorizada e comando de teste confirmado. UID shell ativo.")
+                    modeButton.isEnabled = true
+                    pairButton.text = "ADB CONECTADO"
+                    setBusy(false)
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    adbReady = false
+                    modeButton.isEnabled = false
+                    appendLog("FALHA REAL NO PAREAMENTO/CONEXÃO: ${e.message ?: e.javaClass.simpleName}")
+                    setBusy(false)
+                }
             }
-        } catch (_: Exception) {
-            status.text = "Preferência local removida."
-            refreshDisplayInfo()
         }
     }
 
-    private fun choose(hz: Float) {
-        selectedHz = hz
-        updateButtons()
-        status.text = "Selecionado: ${hz.toInt()} Hz. Toque em LIGAR para solicitar esse modo à tela do Atomic."
+    private fun applyRefreshRate() {
+        val connection = adb
+        if (!adbReady || connection == null || busy) {
+            appendLog("ADB não está conectado. Faça o pareamento primeiro.")
+            return
+        }
+        setBusy(true)
+        thread {
+            try {
+                val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
+                if (!prefs.contains("peak")) {
+                    val peak = connection.shell("settings get system peak_refresh_rate").allOutput.trim()
+                    val min = connection.shell("settings get system min_refresh_rate").allOutput.trim()
+                    prefs.edit().putString("peak", peak).putString("min", min).apply()
+                }
+                val hz = selectedHz
+                runOnUiThread { appendLog("Aplicando solicitação de ${hz} Hz pelo ADB autorizado…") }
+                val result = connection.shell("settings put system peak_refresh_rate $hz && settings put system min_refresh_rate $hz")
+                if (result.exitCode != 0) throw IllegalStateException(result.allOutput)
+                val peakAfter = connection.shell("settings get system peak_refresh_rate").allOutput.trim()
+                val minAfter = connection.shell("settings get system min_refresh_rate").allOutput.trim()
+                if (peakAfter != hz.toString() || minAfter != hz.toString()) {
+                    throw IllegalStateException("O sistema não confirmou os valores. peak=$peakAfter; min=$minAfter")
+                }
+                runOnUiThread {
+                    appendLog("COMANDO CONFIRMADO: peak_refresh_rate=$peakAfter; min_refresh_rate=$minAfter. Isso confirma a gravação, não garante FPS do jogo.")
+                    modeButton.text = "RESTAURAR CONFIGURAÇÕES"
+                    modeButton.setOnClickListener { restoreRefreshRate() }
+                    setBusy(false)
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    appendLog("SISTEMA RECUSOU OU NÃO CONFIRMOU: ${e.message ?: e.javaClass.simpleName}")
+                    setBusy(false)
+                }
+            }
+        }
     }
 
-    private fun refreshDisplayInfo() {
-        val d = window.decorView.display
-        val modes = d?.supportedModes?.map { it.refreshRate.toInt().toString() }?.distinct()
-        val current = d?.refreshRate
-        detected.text = "FREQUÊNCIA REPORTADA\\n" +
-            (current?.let { it.toInt().toString() + " Hz" } ?: "Indisponível") +
-            "\\n\\nModos informados: " + (modes?.joinToString(" / ")?.plus(" Hz") ?: "não disponíveis")
+    private fun restoreRefreshRate() {
+        val connection = adb ?: return
+        if (busy) return
+        setBusy(true)
+        thread {
+            try {
+                val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
+                val oldPeak = prefs.getString("peak", "null") ?: "null"
+                val oldMin = prefs.getString("min", "null") ?: "null"
+                fun restore(key: String, value: String) {
+                    require(value == "null" || value.matches(Regex("[0-9]+(\\.[0-9]+)?"))) { "Backup inválido para $key" }
+                    val cmd = if (value == "null") "settings delete system $key" else "settings put system $key $value"
+                    val response = connection.shell(cmd)
+                    check(response.exitCode == 0) { response.allOutput }
+                }
+                restore("peak_refresh_rate", oldPeak)
+                restore("min_refresh_rate", oldMin)
+                prefs.edit().clear().apply()
+                runOnUiThread {
+                    appendLog("Configurações anteriores restauradas: peak=$oldPeak; min=$oldMin.")
+                    modeButton.text = "LIBERAR ACESSO"
+                    modeButton.setOnClickListener { applyRefreshRate() }
+                    setBusy(false)
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    appendLog("ERRO AO RESTAURAR: ${e.message}")
+                    setBusy(false)
+                }
+            }
+        }
     }
 
-    private fun updateButtons() {
-        hz90.alpha = if (selectedHz == 90f) 1f else .55f
-        hz120.alpha = if (selectedHz == 120f) 1f else .55f
+    private fun appendLog(message: String) {
+        logView.text = logView.text.toString() + "\n> " + message
     }
 
-    private fun choiceButton(label: String, action: () -> Unit) = Button(this).apply {
-        text = label
-        isAllCaps = false
-        setOnClickListener { action() }
+    private fun setBusy(value: Boolean) {
+        busy = value
+        pairButton.isEnabled = !value
+        modeButton.isEnabled = !value && adbReady
     }
 
-    private fun space(height: Int) = View(this).apply {
-        layoutParams = LinearLayout.LayoutParams(1, dp(height))
+    private fun updateChoices() {
+        hz90.alpha = if (selectedHz == 90) 1f else .55f
+        hz120.alpha = if (selectedHz == 120) 1f else .55f
     }
 
-    private fun match() = LinearLayout.LayoutParams(
-        LinearLayout.LayoutParams.MATCH_PARENT,
-        LinearLayout.LayoutParams.WRAP_CONTENT
-    )
+    private fun field(hintText: String, value: String, type: Int) = EditText(this).apply {
+        hint = hintText
+        setText(value)
+        inputType = type
+        textSize = 14f
+        setTextColor(Color.WHITE)
+        setHintTextColor(0xFF7894AD.toInt())
+        setPadding(dp(12), dp(8), dp(12), dp(8))
+        backgroundTintList = ColorStateList.valueOf(0xFF55C9FF.toInt())
+    }
 
+    private fun label(value: String, size: Float, color: Int, bold: Boolean = false) = TextView(this).apply {
+        text = value
+        textSize = size
+        setTextColor(color)
+        gravity = Gravity.CENTER
+        if (bold) typeface = android.graphics.Typeface.DEFAULT_BOLD
+    }
+
+    private fun space(height: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(height)) }
+    private fun match() = LinearLayout.LayoutParams(-1, LinearLayout.LayoutParams.WRAP_CONTENT)
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 }
