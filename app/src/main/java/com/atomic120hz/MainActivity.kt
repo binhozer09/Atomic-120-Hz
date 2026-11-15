@@ -4,17 +4,12 @@ import android.app.Activity
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
-import android.view.WindowManager
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import android.content.Intent
-import android.provider.Settings
-import android.net.Uri
 import android.content.res.ColorStateList
 import android.graphics.Color
-import kotlin.math.abs
 
 class MainActivity : Activity() {
     private var selectedHz = 90f
@@ -24,9 +19,6 @@ class MainActivity : Activity() {
     private lateinit var toggle: Button
     private lateinit var hz90: Button
     private lateinit var hz120: Button
-    private lateinit var accessStatus: TextView
-    private lateinit var accessButton: Button
-    private val prefs by lazy { getSharedPreferences("atomic_access", MODE_PRIVATE) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -34,7 +26,6 @@ class MainActivity : Activity() {
         window.navigationBarColor = Color.rgb(5, 15, 29)
         buildUi()
         refreshDisplayInfo()
-        refreshAtomicAccess()
     }
 
     private fun buildUi() {
@@ -100,25 +91,15 @@ class MainActivity : Activity() {
             typeface = android.graphics.Typeface.DEFAULT_BOLD
         }, match())
         root.addView(space(8))
-        accessStatus = TextView(this).apply {
+        root.addView(TextView(this).apply {
+            text = "O Android bloqueia aplicativos comuns de alterar globalmente os limites de Hz em alguns aparelhos. O Atomic aplica o modo compatível somente à própria tela; não precisa pedir uma autorização que não resolveria esse bloqueio."
             textSize = 13f
             gravity = Gravity.CENTER
             setTextColor(0xFF9ABBD5.toInt())
-            text = "Verificando serviço de autorização…"
-        }
-        root.addView(accessStatus, match())
-        root.addView(space(10))
-        accessButton = Button(this).apply {
-            text = "ATIVAR ATOMIC ACCESS"
-            isAllCaps = false
-            setTextColor(Color.WHITE)
-            backgroundTintList = ColorStateList.valueOf(0xFF155A88.toInt())
-            setOnClickListener { activateAtomicAccess() }
-        }
-        root.addView(accessButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(58)))
+        }, match())
         root.addView(space(18))
         root.addView(TextView(this).apply {
-            text = "Hz da tela não garante FPS igual dentro do jogo. O Android e o fabricante podem limitar a frequência solicitada."
+            text = "Importante: a frequência da tela não desbloqueia o limite interno de FPS de jogos como Free Fire."
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(0xFF7894AD.toInt())
@@ -127,81 +108,43 @@ class MainActivity : Activity() {
         updateButtons()
     }
 
-    private fun activateAtomicAccess() {
-        if (Settings.System.canWrite(this)) {
-            refreshAtomicAccess()
-            return
-        }
-        accessStatus.text = "Autorize o Atomic a modificar configurações do sistema na próxima tela."
-        startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:$packageName")))
-    }
-
-    private fun refreshAtomicAccess() {
-        if (!::accessStatus.isInitialized) return
-        val granted = Settings.System.canWrite(this)
-        accessStatus.text = if (granted) "Acesso especial concedido • controle de taxa de atualização disponível." else "Aguardando autorização especial do Android."
-        accessButton.text = if (granted) "ATOMIC ACCESS LIBERADO" else "LIBERAR ATOMIC ACCESS"
-    }
-
-    override fun onResume() {
-        super.onResume()
-        if (::accessStatus.isInitialized) refreshAtomicAccess()
-    }
-
     private fun enableMode() {
-        if (!Settings.System.canWrite(this)) {
-            status.text = "Primeiro libere o Atomic Access abaixo."
-            activateAtomicAccess()
+        val mode = window.decorView.display?.supportedModes
+            ?.filter { kotlin.math.abs(it.refreshRate - selectedHz) < 2f }
+            ?.maxByOrNull { it.refreshRate }
+
+        if (mode == null) {
+            enabled = false
+            toggle.text = "NÃO DISPONÍVEL"
+            status.text = "Este aparelho não informou um modo de ${selectedHz.toInt()} Hz compatível."
             return
         }
-        val resolver = contentResolver
-        if (!prefs.getBoolean("saved_original", false)) {
-            prefs.edit()
-                .putString("old_peak", Settings.System.getString(resolver, "peak_refresh_rate"))
-                .putString("old_min", Settings.System.getString(resolver, "min_refresh_rate"))
-                .putBoolean("saved_original", true).apply()
-        }
-        val target = selectedHz.toString()
-        Settings.System.putString(resolver, "peak_refresh_rate", target)
-        Settings.System.putString(resolver, "min_refresh_rate", target)
-        val actualPeak = Settings.System.getString(resolver, "peak_refresh_rate")
-        val actualMin = Settings.System.getString(resolver, "min_refresh_rate")
-        val verified = actualPeak == target && actualMin == target
-        enabled = verified
-        toggle.text = if (verified) "LIGADO" else "NÃO CONFIRMADO"
-        toggle.backgroundTintList = ColorStateList.valueOf(if (verified) 0xFF087A58.toInt() else 0xFF8A4A20.toInt())
-        status.text = if (verified) "Sistema aceitou $target Hz. Isso não comprova FPS do Free Fire." else "O Android/fabricante não confirmou: peak=$actualPeak • min=$actualMin."
+
+        val params = window.attributes
+        params.preferredDisplayModeId = mode.modeId
+        window.attributes = params
+        enabled = true
+        toggle.text = "LIGADO"
+        toggle.backgroundTintList = ColorStateList.valueOf(0xFF087A58.toInt())
+        status.text = "Solicitado ${mode.refreshRate.toInt()} Hz para a tela do Atomic. Isso não altera a frequência de outros aplicativos."
         refreshDisplayInfo()
     }
 
     private fun disableMode() {
-        if (!Settings.System.canWrite(this)) {
-            status.text = "Sem Atomic Access: não foi possível restaurar as configurações."
-            activateAtomicAccess()
-            return
-        }
-        val oldP = prefs.getString("old_peak", null)
-        val oldM = prefs.getString("old_min", null)
-        Settings.System.putString(contentResolver, "peak_refresh_rate", oldP)
-        Settings.System.putString(contentResolver, "min_refresh_rate", oldM)
-        prefs.edit().remove("old_peak").remove("old_min").putBoolean("saved_original", false).apply()
+        val params = window.attributes
+        params.preferredDisplayModeId = 0
+        window.attributes = params
         enabled = false
         toggle.text = "DESLIGADO"
         toggle.backgroundTintList = ColorStateList.valueOf(0xFF174568.toInt())
-        status.text = "Configurações anteriores restauradas quando suportadas pelo fabricante."
+        status.text = "Preferência de frequência removida da tela do Atomic."
         refreshDisplayInfo()
     }
 
     private fun choose(hz: Float) {
         selectedHz = hz
         updateButtons()
-        status.text = "Selecionado: " + hz.toInt() + " Hz. Toque em LIGAR para solicitar ao Android."
-    }
-
-    private fun findMode(hz: Float): android.view.Display.Mode? {
-        return window.decorView.display?.supportedModes
-            ?.filter { abs(it.refreshRate - hz) < 2f }
-            ?.maxByOrNull { it.refreshRate }
+        status.text = "Selecionado: ${hz.toInt()} Hz. Toque em LIGAR para solicitar esse modo à tela do Atomic."
     }
 
     private fun refreshDisplayInfo() {
