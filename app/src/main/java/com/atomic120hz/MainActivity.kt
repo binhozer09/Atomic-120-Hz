@@ -11,12 +11,14 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.content.res.ColorStateList
+import android.net.nsd.NsdManager
+import android.net.nsd.NsdServiceInfo
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import android.text.InputType
 import com.flyfishxu.kadb.Kadb
-import com.flyfishxu.kadb.mdns.KadbMdnsAndroid
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 import kotlin.concurrent.thread
 
 class MainActivity : Activity() {
@@ -113,23 +115,15 @@ class MainActivity : Activity() {
         setBusy(true)
         appendLog("Iniciando descoberta mDNS do serviço ADB de pareamento…")
         thread {
-            val discovery = KadbMdnsAndroid(applicationContext)
             try {
-                discovery.start()
-                val pairEndpoint = runBlocking {
-                    withTimeout(45_000) {
-                        discovery.state.first { it.pairDevices.isNotEmpty() }.pairDevices.first()
-                    }
-                }
-                runOnUiThread { appendLog("Porta de pareamento encontrada automaticamente. Realizando handshake TLS…") }
-                runBlocking { Kadb.pair(pairEndpoint.host, pairEndpoint.port, code) }
-                runOnUiThread { appendLog("Pareamento aceito. Procurando a porta segura de conexão…") }
-                val connectEndpoint = runBlocking {
-                    withTimeout(45_000) {
-                        discovery.state.first { it.connectDevices.isNotEmpty() }.connectDevices.first()
-                    }
-                }
-                val connection = Kadb.create(connectEndpoint.host, connectEndpoint.port)
+                appendFromWorker("Procurando serviço de pareamento ADB na rede local…")
+                val pairEndpoint = discoverAdbEndpoint("_adb-tls-pairing._tcp.")
+                appendFromWorker("Porta de pareamento encontrada em ${pairEndpoint.first}:${pairEndpoint.second}. Realizando handshake TLS…")
+                runBlocking { Kadb.pair(pairEndpoint.first, pairEndpoint.second, code) }
+                appendFromWorker("Pareamento aceito. Procurando a porta segura de conexão…")
+                val connectEndpoint = discoverAdbEndpoint("_adb-tls-connect._tcp.")
+                appendFromWorker("Serviço de conexão encontrado em ${connectEndpoint.first}:${connectEndpoint.second}. Conectando…")
+                val connection = Kadb.create(connectEndpoint.first, connectEndpoint.second)
                 val check = connection.shell("echo ATOMIC_ADB_OK")
                 if (check.exitCode != 0 || !check.allOutput.contains("ATOMIC_ADB_OK")) {
                     connection.close()
@@ -155,12 +149,74 @@ class MainActivity : Activity() {
                     appendLog("FALHA REAL NO PAREAMENTO/CONEXÃO: ${e.message ?: e.javaClass.simpleName}")
                     setBusy(false)
                 }
-            } finally {
-                discovery.close()
             }
         }
     }
 
+
+
+    private fun appendFromWorker(message: String) {
+        runOnUiThread { appendLog(message) }
+    }
+
+    /**
+     * Descobre serviços ADB Wireless Debugging usando o NSD nativo do Android.
+     * Assim o app não depende de um artefato mDNS externo.
+     */
+    @Suppress("DEPRECATION")
+    private fun discoverAdbEndpoint(serviceType: String): Pair<String, Int> {
+        val nsd = getSystemService(NSD_SERVICE) as NsdManager
+        val latch = CountDownLatch(1)
+        val endpoint = AtomicReference<Pair<String, Int>?>(null)
+        val failure = AtomicReference<String?>(null)
+        val resolving = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        val resolveListener = object : NsdManager.ResolveListener {
+            override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                failure.set("Falha ao resolver serviço ADB (código $errorCode).")
+                latch.countDown()
+            }
+
+            override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
+                val host = serviceInfo.host?.hostAddress
+                if (!host.isNullOrBlank() && serviceInfo.port > 0) {
+                    endpoint.set(host to serviceInfo.port)
+                } else {
+                    failure.set("O Android encontrou o serviço, mas não informou host/porta válidos.")
+                }
+                latch.countDown()
+            }
+        }
+
+        val discoveryListener = object : NsdManager.DiscoveryListener {
+            override fun onDiscoveryStarted(regType: String) {}
+            override fun onServiceFound(serviceInfo: NsdServiceInfo) {
+                if (serviceInfo.serviceType.contains(serviceType.removeSuffix(".")) &&
+                    resolving.compareAndSet(false, true)) {
+                    nsd.resolveService(serviceInfo, resolveListener)
+                }
+            }
+            override fun onServiceLost(serviceInfo: NsdServiceInfo) {}
+            override fun onDiscoveryStopped(serviceType: String) {}
+            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
+                failure.set("Falha ao iniciar descoberta mDNS (código $errorCode).")
+                latch.countDown()
+            }
+            override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
+                failure.compareAndSet(null, "Falha ao encerrar descoberta mDNS (código $errorCode).")
+            }
+        }
+
+        nsd.discoverServices(serviceType, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
+        try {
+            if (!latch.await(45, TimeUnit.SECONDS)) {
+                throw IllegalStateException("Tempo esgotado procurando $serviceType. Confirme que a tela de pareamento/depuração sem fio está aberta.")
+            }
+            return endpoint.get() ?: throw IllegalStateException(failure.get() ?: "Nenhum endpoint ADB foi encontrado.")
+        } finally {
+            try { nsd.stopServiceDiscovery(discoveryListener) } catch (_: Exception) {}
+        }
+    }
 
     /**
      * Rotina automática conservadora: coleta evidências reais do aparelho e só solicita
