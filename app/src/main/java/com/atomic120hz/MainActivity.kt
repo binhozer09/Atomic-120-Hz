@@ -347,10 +347,12 @@ class MainActivity : Activity() {
      */
     private fun runAutomaticSetup(connection: Kadb) {
         fun command(title: String, cmd: String): String {
-            runOnUiThread { appendLog(title) }
+            appendFromWorker(title)
+            appendFromWorker("$ " + cmd)
             val result = connection.shell(cmd)
+            appendFromWorker("SAÍDA:\\n" + result.allOutput.ifBlank { "(sem saída)" } + "\\nCÓDIGO DE SAÍDA: " + result.exitCode)
             if (result.exitCode != 0) {
-                runOnUiThread { appendLog("COMANDO RECUSADO (código ${result.exitCode}): ${result.allOutput.take(500)}") }
+                appendFromWorker("COMANDO RECUSADO/FALHOU (código ${result.exitCode}).")
                 return ""
             }
             return result.allOutput.trim()
@@ -366,10 +368,10 @@ class MainActivity : Activity() {
             val power = command("Verificando modo de economia de energia…", "settings get global low_power")
             val gamePath = command("Verificando instalação do Free Fire…", "pm path com.dts.freefireth")
             val displayDump = command("Lendo modos de exibição informados pelo Android…", "dumpsys display")
-            val has90 = Regex("""(?i)(fps|refreshRate|refresh rate)[^\\n]{0,35}90(?:\\.0+)?""").containsMatchIn(displayDump) ||
-                Regex("""(?i)90(?:\\.0+)?[^\\n]{0,35}(fps|refreshRate|refresh rate)""").containsMatchIn(displayDump)
-            val has120 = Regex("""(?i)(fps|refreshRate|refresh rate)[^\\n]{0,35}120(?:\\.0+)?""").containsMatchIn(displayDump) ||
-                Regex("""(?i)120(?:\\.0+)?[^\\n]{0,35}(fps|refreshRate|refresh rate)""").containsMatchIn(displayDump)
+            val has90 = Regex("""(?i)(fps|refreshRate|refresh rate)[^\n]{0,35}90(?:\\.0+)?""").containsMatchIn(displayDump) ||
+                Regex("""(?i)90(?:\\.0+)?[^\n]{0,35}(fps|refreshRate|refresh rate)""").containsMatchIn(displayDump)
+            val has120 = Regex("""(?i)(fps|refreshRate|refresh rate)[^\n]{0,35}120(?:\\.0+)?""").containsMatchIn(displayDump) ||
+                Regex("""(?i)120(?:\\.0+)?[^\n]{0,35}(fps|refreshRate|refresh rate)""").containsMatchIn(displayDump)
 
             runOnUiThread {
                 appendLog("DIAGNÓSTICO: fabricante=$manufacturer; modelo=$model; Android=$androidVersion; HyperOS/MIUI=$hyperOs.")
@@ -394,7 +396,7 @@ class MainActivity : Activity() {
             val peakAfter = command("Conferindo limite máximo aplicado…", "settings get system peak_refresh_rate")
             val minAfter = command("Conferindo limite mínimo aplicado…", "settings get system min_refresh_rate")
             val actual = command("Consultando taxa de atualização reportada pelo display…", "dumpsys display")
-            val actual90 = Regex("""(?i)(renderFrameRate|active.*fps|refreshRate)[^\\n]{0,35}90(?:\\.0+)?""").containsMatchIn(actual)
+            val actual90 = Regex("""(?i)(renderFrameRate|active.*fps|refreshRate)[^\n]{0,35}90(?:\\.0+)?""").containsMatchIn(actual)
             runOnUiThread {
                 if (peakAfter == "90" && minAfter == "90") {
                     appendLog("CONFIGURAÇÕES ACEITAS: peak=$peakAfter; min=$minAfter.")
@@ -495,7 +497,7 @@ class MainActivity : Activity() {
             try {
                 appendFromWorker("$ " + command)
                 val result = connection.shell(command)
-                appendFromWorker("SAÍDA:\\n" + result.allOutput.ifBlank { "(sem saída)" } + "\\nCÓDIGO DE SAÍDA: " + result.exitCode)
+                appendFromWorker("SAÍDA:\n" + result.allOutput.ifBlank { "(sem saída)" } + "\nCÓDIGO DE SAÍDA: " + result.exitCode)
             } catch (e: Exception) {
                 appendFromWorker("ERRO DE EXECUÇÃO: " + (e.message ?: e.javaClass.simpleName))
             } finally {
@@ -506,7 +508,7 @@ class MainActivity : Activity() {
 
     private fun appendLog(message: String) {
         val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
-        logView.text = logView.text.toString() + "\\n[" + time + "] > " + message
+        logView.text = logView.text.toString() + "\n[" + time + "] > " + message
     }
 
     private fun setBusy(value: Boolean) {
