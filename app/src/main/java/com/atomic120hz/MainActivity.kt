@@ -37,7 +37,6 @@ class MainActivity : Activity() {
     private var adbReady = false
     private var busy = false
     private var adb: Kadb? = null
-    private lateinit var codeInput: EditText
     private lateinit var logView: TextView
     private lateinit var pairButton: Button
     private lateinit var modeButton: Button
@@ -63,7 +62,6 @@ class MainActivity : Activity() {
     private fun handleNotificationCode(source: Intent?) {
         val code = source?.getStringExtra(PairCodeReceiver.EXTRA_CODE) ?: return
         source.removeExtra(PairCodeReceiver.EXTRA_CODE)
-        codeInput.setText(code)
         appendLog("Código recebido pela notificação. Iniciando pareamento ADB…")
         pairAndConnect(code)
     }
@@ -75,7 +73,7 @@ class MainActivity : Activity() {
                 showPairingNotification()
                 appendLog("Notificação de pareamento ativada. Abra “Parear dispositivo com código” nas opções de Depuração sem fio.")
             } else {
-                appendLog("Permissão de notificações negada. Você ainda pode digitar o código no campo do aplicativo.")
+                appendLog("Permissão de notificações negada. Ative as notificações do Atomic para enviar o código pelo painel.")
             }
         }
     }
@@ -156,26 +154,12 @@ class MainActivity : Activity() {
         root.addView(label("ATOMIC ACCESS • ADB INTEGRADO", 12f, 0xFF9ABBD5.toInt()), match())
         root.addView(space(18))
         root.addView(label("PAREAMENTO AUTOMÁTICO", 16f, Color.WHITE, true), match())
-        root.addView(label("1. Ative Opções do desenvolvedor e Depuração sem fio.\n2. Abra “Parear dispositivo com código”.\n3. Digite aqui o código de 6 dígitos. O Atomic detecta as portas automaticamente.", 13f, 0xFF9ABBD5.toInt()), match())
-        codeInput = EditText(this).apply {
-            hint = "Código de pareamento (6 dígitos)"
-            inputType = InputType.TYPE_CLASS_NUMBER
-            setTextColor(Color.WHITE)
-            setHintTextColor(0xFF7894AD.toInt())
-            textSize = 18f
-            gravity = Gravity.CENTER
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            backgroundTintList = ColorStateList.valueOf(0xFF55C9FF.toInt())
-        }
-        root.addView(codeInput, match())
+        root.addView(label("1. Ative Opções do desenvolvedor e Depuração sem fio.\n2. Toque em LIBERAR ACESSO.\n3. Abra “Parear dispositivo com código” no Android.\n4. Digite os 6 números na notificação do Atomic e toque em ENVIAR CÓDIGO. O ADB será pareado e conectado automaticamente.", 13f, 0xFF9ABBD5.toInt()), match())
         root.addView(space(8))
         pairButton = Button(this).apply {
             text = "LIBERAR ACESSO"
             isAllCaps = false
-            setOnClickListener {
-                val entered = codeInput.text.toString().trim()
-                if (entered.isEmpty()) requestPairingCodeNotification() else pairAndConnect()
-            }
+            setOnClickListener { requestPairingCodeNotification() }
         }
         root.addView(pairButton, LinearLayout.LayoutParams(-1, dp(58)))
         root.addView(space(18))
@@ -224,9 +208,8 @@ class MainActivity : Activity() {
         updateChoices()
     }
 
-    private fun pairAndConnect(codeOverride: String? = null) {
+    private fun pairAndConnect(code: String) {
         if (busy) return
-        val code = codeOverride ?: codeInput.text.toString().trim()
         if (!code.matches(Regex("\\d{6}"))) {
             appendLog("Informe o código de pareamento de 6 dígitos mostrado pelo Android.")
             return
