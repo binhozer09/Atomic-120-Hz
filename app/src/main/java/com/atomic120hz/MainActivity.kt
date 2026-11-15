@@ -73,8 +73,8 @@ class MainActivity : Activity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_NOTIFICATIONS) {
             if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                showPairingNotification()
-                appendLog("Notificação de pareamento ativada. Abra “Parear dispositivo com código” nas opções de Depuração sem fio.")
+                requestPairingCodeNotification()
+                appendLog("Permissão concedida. Iniciando descoberta mDNS antes de solicitar o código.")
             } else {
                 appendLog("Permissão de notificações negada. Ative as notificações do Atomic para enviar o código pelo painel.")
             }
@@ -313,10 +313,25 @@ class MainActivity : Activity() {
 
             override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
                 val host = serviceInfo.host?.hostAddress
-                if (!host.isNullOrBlank() && serviceInfo.port in 1..65535) {
-                    endpoint.set(host to serviceInfo.port)
+                val localAddress = try {
+                    !host.isNullOrBlank() && java.net.NetworkInterface.getNetworkInterfaces()
+                        .asSequence()
+                        .any { networkInterface ->
+                            networkInterface.inetAddresses.asSequence().any { it.hostAddress == host }
+                        }
+                } catch (_: Exception) { false }
+                // Shizuku accepts only the phone's own mDNS endpoint and then connects
+                // through loopback, never through a hard-coded LAN address.
+                val localPortActive = try {
+                    java.net.ServerSocket().use { socket ->
+                        socket.bind(java.net.InetSocketAddress("127.0.0.1", serviceInfo.port), 1)
+                        false
+                    }
+                } catch (_: java.io.IOException) { true }
+                if (localAddress && localPortActive && serviceInfo.port in 1..65535) {
+                    endpoint.set("127.0.0.1" to serviceInfo.port)
                 } else {
-                    failure.set("Serviço encontrado, mas o Android não informou IP/porta válidos.")
+                    failure.set("Serviço mDNS encontrado, mas não corresponde a uma porta ADB local ativa do próprio celular (host=$host, porta=${serviceInfo.port}).")
                 }
                 latch.countDown()
             }
