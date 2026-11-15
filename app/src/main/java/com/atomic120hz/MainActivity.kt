@@ -1,6 +1,17 @@
 package com.atomic120hz
 
 import android.app.Activity
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.RemoteInput
+import android.Manifest
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.graphics.Color
 import android.view.Gravity
@@ -38,6 +49,92 @@ class MainActivity : Activity() {
         window.statusBarColor = Color.rgb(5, 15, 29)
         window.navigationBarColor = Color.rgb(5, 15, 29)
         buildUi()
+        handleNotificationCode(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNotificationCode(intent)
+    }
+
+    private fun handleNotificationCode(source: Intent?) {
+        val code = source?.getStringExtra(PairCodeReceiver.EXTRA_CODE) ?: return
+        source.removeExtra(PairCodeReceiver.EXTRA_CODE)
+        codeInput.setText(code)
+        appendLog("Código recebido pela notificação. Iniciando pareamento ADB…")
+        pairAndConnect(code)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_NOTIFICATIONS) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                showPairingNotification()
+                appendLog("Notificação de pareamento ativada. Abra “Parear dispositivo com código” nas opções de Depuração sem fio.")
+            } else {
+                appendLog("Permissão de notificações negada. Você ainda pode digitar o código no campo do aplicativo.")
+            }
+        }
+    }
+
+    private fun requestPairingCodeNotification() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
+            return
+        }
+        showPairingNotification()
+        appendLog("Notificação enviada ao painel superior. Abra a tela “Parear dispositivo com código” do Android e responda à notificação com os 6 dígitos.")
+    }
+
+    private fun showPairingNotification() {
+        val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= 26) {
+            manager.createNotificationChannel(
+                NotificationChannel(PAIR_CHANNEL, "Pareamento Atomic Access", NotificationManager.IMPORTANCE_HIGH).apply {
+                    description = "Solicitação do código de pareamento da Depuração sem fio"
+                    setShowBadge(true)
+                }
+            )
+        }
+        val remoteInput = RemoteInput.Builder(PairCodeReceiver.KEY_CODE)
+            .setLabel("Digite o código de 6 dígitos")
+            .build()
+        val receiverIntent = Intent(this, PairCodeReceiver::class.java).setPackage(packageName)
+        val pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT or
+            (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
+        val replyPendingIntent = PendingIntent.getBroadcast(this, 120, receiverIntent, pendingFlags)
+        val action = Notification.Action.Builder(
+            android.R.drawable.ic_menu_send, "ENVIAR CÓDIGO", replyPendingIntent
+        ).addRemoteInput(remoteInput).build()
+        val openIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val contentPending = PendingIntent.getActivity(
+            this, 121, openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, PAIR_CHANNEL)
+            else Notification.Builder(this)
+        val notification = builder
+            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+            .setContentTitle("Atomic Access • código de pareamento")
+            .setContentText("Abra “Parear dispositivo com código” e responda aqui com os 6 dígitos.")
+            .setStyle(Notification.BigTextStyle().bigText("No Android, entre em Opções do desenvolvedor > Depuração sem fio > Parear dispositivo com código. Digite os 6 números nesta notificação e toque em ENVIAR CÓDIGO."))
+            .addAction(action)
+            .setContentIntent(contentPending)
+            .setOngoing(true)
+            .setAutoCancel(false)
+            .setOnlyAlertOnce(true)
+            .build()
+        manager.notify(PAIR_NOTIFICATION_ID, notification)
+    }
+
+    companion object {
+        private const val REQUEST_NOTIFICATIONS = 1201
+        private const val PAIR_CHANNEL = "atomic_pairing"
+        private const val PAIR_NOTIFICATION_ID = 1202
     }
 
     override fun onDestroy() {
@@ -73,7 +170,10 @@ class MainActivity : Activity() {
         pairButton = Button(this).apply {
             text = "LIBERAR ACESSO"
             isAllCaps = false
-            setOnClickListener { pairAndConnect() }
+            setOnClickListener {
+                val entered = codeInput.text.toString().trim()
+                if (entered.isEmpty()) requestPairingCodeNotification() else pairAndConnect()
+            }
         }
         root.addView(pairButton, LinearLayout.LayoutParams(-1, dp(58)))
         root.addView(space(18))
@@ -105,9 +205,9 @@ class MainActivity : Activity() {
         updateChoices()
     }
 
-    private fun pairAndConnect() {
+    private fun pairAndConnect(codeOverride: String? = null) {
         if (busy) return
-        val code = codeInput.text.toString().trim()
+        val code = codeOverride ?: codeInput.text.toString().trim()
         if (!code.matches(Regex("\\d{6}"))) {
             appendLog("Informe o código de pareamento de 6 dígitos mostrado pelo Android.")
             return
@@ -132,6 +232,7 @@ class MainActivity : Activity() {
                 adb?.close()
                 adb = connection
                 adbReady = true
+                (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).cancel(PAIR_NOTIFICATION_ID)
                 runOnUiThread {
                     appendLog("CONEXÃO CONFIRMADA: pareamento TLS concluído e teste de shell retornou ATOMIC_ADB_OK.")
                     pairButton.text = "ADB CONECTADO"
@@ -191,7 +292,9 @@ class MainActivity : Activity() {
         val discoveryListener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(regType: String) {}
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-                if (serviceInfo.serviceType.contains(serviceType.removeSuffix(".")) &&
+                val foundType = serviceInfo.serviceType.trimEnd('.')
+                val expectedType = serviceType.trimEnd('.')
+                if (foundType.equals(expectedType, ignoreCase = true) &&
                     resolving.compareAndSet(false, true)) {
                     nsd.resolveService(serviceInfo, resolveListener)
                 }
@@ -385,4 +488,24 @@ class MainActivity : Activity() {
     private fun space(height: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(height)) }
     private fun match() = LinearLayout.LayoutParams(-1, LinearLayout.LayoutParams.WRAP_CONTENT)
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+}
+
+
+/** Recebe o código digitado diretamente na notificação do Android. */
+class PairCodeReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val results = RemoteInput.getResultsFromIntent(intent) ?: return
+        val code = results.getCharSequence(KEY_CODE)?.toString()?.trim() ?: return
+        if (!code.matches(Regex("\\d{6}"))) return
+        val launch = Intent(context, MainActivity::class.java).apply {
+            putExtra(EXTRA_CODE, code)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+        context.startActivity(launch)
+    }
+
+    companion object {
+        const val KEY_CODE = "atomic_pairing_code"
+        const val EXTRA_CODE = "atomic_pairing_code_extra"
+    }
 }
