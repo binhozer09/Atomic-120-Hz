@@ -141,6 +141,10 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     appendLog("CONEXÃO CONFIRMADA: pareamento TLS concluído e teste de shell retornou ATOMIC_ADB_OK.")
                     pairButton.text = "ADB CONECTADO"
+                    appendLog("Iniciando diagnóstico e configuração automática para 90 Hz…")
+                }
+                runAutomaticSetup(connection)
+                runOnUiThread {
                     modeButton.isEnabled = true
                     setBusy(false)
                 }
@@ -154,6 +158,76 @@ class MainActivity : Activity() {
             } finally {
                 discovery.close()
             }
+        }
+    }
+
+
+    /**
+     * Rotina automática conservadora: coleta evidências reais do aparelho e só solicita
+     * 90 Hz se o próprio dumpsys informar que há um modo de 90 Hz disponível.
+     * Não tenta alterar limites internos do jogo nem propriedades protegidas do fabricante.
+     */
+    private fun runAutomaticSetup(connection: Kadb) {
+        fun command(title: String, cmd: String): String {
+            runOnUiThread { appendLog(title) }
+            val result = connection.shell(cmd)
+            if (result.exitCode != 0) {
+                runOnUiThread { appendLog("COMANDO RECUSADO (código ${result.exitCode}): ${result.allOutput.take(500)}") }
+                return ""
+            }
+            return result.allOutput.trim()
+        }
+
+        try {
+            val androidVersion = command("Identificando versão do Android…", "getprop ro.build.version.release")
+            val manufacturer = command("Identificando fabricante…", "getprop ro.product.manufacturer")
+            val model = command("Identificando modelo…", "getprop ro.product.model")
+            val hyperOs = command("Verificando versão HyperOS/MIUI…", "getprop ro.miui.ui.version.name")
+            val peakBefore = command("Lendo limite máximo atual…", "settings get system peak_refresh_rate")
+            val minBefore = command("Lendo limite mínimo atual…", "settings get system min_refresh_rate")
+            val power = command("Verificando modo de economia de energia…", "settings get global low_power")
+            val gamePath = command("Verificando instalação do Free Fire…", "pm path com.dts.freefireth")
+            val displayDump = command("Lendo modos de exibição informados pelo Android…", "dumpsys display")
+            val has90 = Regex("""(?i)(fps|refreshRate|refresh rate)[^\\n]{0,35}90(?:\\.0+)?""").containsMatchIn(displayDump) ||
+                Regex("""(?i)90(?:\\.0+)?[^\\n]{0,35}(fps|refreshRate|refresh rate)""").containsMatchIn(displayDump)
+            val has120 = Regex("""(?i)(fps|refreshRate|refresh rate)[^\\n]{0,35}120(?:\\.0+)?""").containsMatchIn(displayDump) ||
+                Regex("""(?i)120(?:\\.0+)?[^\\n]{0,35}(fps|refreshRate|refresh rate)""").containsMatchIn(displayDump)
+
+            runOnUiThread {
+                appendLog("DIAGNÓSTICO: fabricante=$manufacturer; modelo=$model; Android=$androidVersion; HyperOS/MIUI=$hyperOs.")
+                appendLog("ESTADO ANTERIOR: peak=$peakBefore; min=$minBefore; economia=$power.")
+                appendLog(if (gamePath.contains("package:", true)) "Free Fire instalado." else "Free Fire não encontrado (com.dts.freefireth).")
+                appendLog("MODOS DETECTADOS NO DUMPSYS: 90 Hz=$has90; 120 Hz=$has120.")
+            }
+
+            if (!has90) {
+                runOnUiThread { appendLog("AUTOMAÇÃO PAUSADA: o relatório do sistema não confirmou modo de 90 Hz. Nenhuma alteração foi aplicada.") }
+                return
+            }
+
+            val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
+            if (!prefs.contains("peak")) {
+                prefs.edit().putString("peak", peakBefore.ifBlank { "null" })
+                    .putString("min", minBefore.ifBlank { "null" }).apply()
+            }
+
+            command("Solicitando 90 Hz por ADB autorizado…",
+                "settings put system peak_refresh_rate 90 && settings put system min_refresh_rate 90")
+            val peakAfter = command("Conferindo limite máximo aplicado…", "settings get system peak_refresh_rate")
+            val minAfter = command("Conferindo limite mínimo aplicado…", "settings get system min_refresh_rate")
+            val actual = command("Consultando taxa de atualização reportada pelo display…", "dumpsys display")
+            val actual90 = Regex("""(?i)(renderFrameRate|active.*fps|refreshRate)[^\\n]{0,35}90(?:\\.0+)?""").containsMatchIn(actual)
+            runOnUiThread {
+                if (peakAfter == "90" && minAfter == "90") {
+                    appendLog("CONFIGURAÇÕES ACEITAS: peak=$peakAfter; min=$minAfter.")
+                } else {
+                    appendLog("O fabricante não confirmou os dois limites: peak=$peakAfter; min=$minAfter.")
+                }
+                appendLog(if (actual90) "O relatório atual mostra referência a 90 Hz." else "A taxa ativa de 90 Hz ainda não foi comprovada. O sistema pode manter outro modo.")
+                appendLog("IMPORTANTE: isso ajusta a tela. Não altera nem garante o limite de FPS interno do Free Fire.")
+            }
+        } catch (e: Exception) {
+            runOnUiThread { appendLog("FALHA NO PROCESSO AUTOMÁTICO: ${e.message ?: e.javaClass.simpleName}") }
         }
     }
 
