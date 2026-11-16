@@ -31,7 +31,7 @@ object AtomicAdbClient {
 
         // The pairing port and the ADB session port are different. autoConnect
         // resolves the _adb-tls-connect._tcp service instead of reusing pairingPort.
-        val connected = adb.autoConnect(context.applicationContext, 15_000)
+        val connected = adb.connectTls(context.applicationContext, 15_000)
         if (!connected) {
             throw IOException("Pareamento concluído, mas não encontrei a porta TLS de conexão. Mantenha a Depuração sem fio ativa e tente novamente.")
         }
