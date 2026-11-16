@@ -397,8 +397,7 @@ class MainActivity : Activity() {
                             if (limit <= 0) continue
                             val bytes = zip.getInputStream(entry).use { input ->
                                 val out = java.io.ByteArrayOutputStream()
-                                val buffer = ByteArray(8192)
-                                var readTotal = 0
+                                val buffer = ByteArray(8192)                                var readTotal = 0
                                 while (readTotal < limit) {
                                     val n = input.read(buffer, 0, minOf(buffer.size, limit - readTotal))
                                     if (n <= 0) break
@@ -789,6 +788,10 @@ class MainActivity : Activity() {
                 "cmd game list 2>&1; echo '--- GAME OVERLAY ---'; device_config get game_overlay com.dts.freefireth 2>&1; echo '--- GAME DUMP ---'; dumpsys game 2>&1 | grep -i -A 16 -B 5 -E 'com.dts.freefireth|game.?mode|fps|frame.?rate|intervention' | head -n 220; echo '--- GAME MANAGER ---'; dumpsys game_manager 2>&1 | grep -i -A 16 -B 5 -E 'com.dts.freefireth|game.?mode|intervention|fps|frame.?rate|downscale' | head -n 220; echo '--- DEVICE CONFIG ---'; device_config list game_overlay 2>&1 | grep -i -A 4 -B 3 'com.dts.freefireth' | head -n 100")
             section("04 — SERVIÇOS / PACOTES DE JOGOS E FABRICANTE",
                 "echo '--- SERVICES ---'; service list 2>&1 | grep -iE 'game|booster|perf|power|thermal|display|refresh|miui|xiaomi|mediatek|mtk' | head -n 180; echo '--- DUMPSYS SERVICES ---'; dumpsys -l 2>&1 | grep -iE 'game|booster|perf|power|thermal|display|refresh|miui|xiaomi|mediatek|mtk' | head -n 180; echo '--- SYSTEM PACKAGES ---'; pm list packages -s 2>&1 | grep -iE 'game|booster|perf|power|thermal|display|refresh|miui|xiaomi|mediatek|mtk' | head -n 180")
+            section("04A — INVESTIGAÇÃO DIRETA DO MIUIBOOSTERSERVICE",
+                "echo '--- SERVICE CHECK ---'; service check miuiboosterservice 2>&1; echo '--- DUMPSYS DIRETO ---'; dumpsys miuiboosterservice 2>&1 | head -n 260; echo '--- SERVIÇOS COM BOOSTER ---'; service list 2>&1 | grep -i -A 2 -B 2 'miuibooster'; dumpsys -l 2>&1 | grep -i -A 2 -B 2 'miuibooster'; echo '--- PACOTES XIAOMI RELACIONADOS ---'; pm list packages -s 2>&1 | grep -iE 'booster|powerkeeper|securitycenter|game' | head -n 120; echo '--- PROCESSOS RELACIONADOS ---'; ps -A 2>&1 | grep -iE 'booster|powerkeeper|gamebooster|com.dts.freefireth|freefire' | head -n 140")
+            section("04B — REGISTROS RECENTES DE INTERVENÇÃO (LEITURA)",
+                "echo '--- LOGCAT: MIUI BOOSTER / FREE FIRE / FPS ---'; logcat -d -t 3000 2>&1 | grep -iE 'miuibooster|miui.?booster|game.?booster|powerkeeper|com.dts.freefireth|freefire|frame.?rate|fps' | tail -n 260; echo '--- GAME MANAGER ASSOCIADO AO PACOTE ---'; dumpsys game 2>&1 | grep -i -A 18 -B 6 'com.dts.freefireth' | head -n 100; echo '--- POWER HINTS ---'; dumpsys power 2>&1 | grep -iE -A 3 -B 3 'hint|boost|game|performance|interactive' | head -n 100")
             section("05 — PROPRIEDADES HYPEROS / POLÍTICAS FPS",
                 "getprop 2>/dev/null | grep -iE 'game|fps|frame.?rate|refresh|thermal|performance|power.?mode|gpu|miui|xiaomi|mediatek|mtk' | head -n 240; echo '--- GAME OVERLAY CONFIG ---'; device_config list game_overlay 2>&1 | head -n 180")
             section("06 — DISPLAY / MODOS / LIMITES ATIVOS",
@@ -797,8 +800,7 @@ class MainActivity : Activity() {
                 "dumpsys SurfaceFlinger 2>&1 | grep -iE 'GLES:|GL_VENDOR|GL_RENDERER|GPU|renderer|RenderEngine|refresh|frame.?rate|composition' | head -n 180; echo '--- LAYERS ---'; dumpsys SurfaceFlinger --list 2>&1 | grep -iE 'freefire|com.dts.freefireth|SurfaceView|Unity|Game' | head -n 160; echo '--- DISPLAY ID ---'; dumpsys SurfaceFlinger --display-id 2>&1 | head -n 80")
             section("08 — PROCESSOS / PID / THREADS / CPU / MEMÓRIA",
                 "echo '--- PID ---'; pidof com.dts.freefireth 2>&1; echo '--- PROCESS LIST ---'; ps -A 2>&1 | grep -iE 'com.dts.freefireth|freefire|surfaceflinger|game|booster|perf|thermal' | head -n 180; echo '--- THREADS ---'; ps -T -A 2>&1 | grep -iE 'com.dts.freefireth|freefire' | head -n 160; echo '--- CPUINFO ---'; dumpsys cpuinfo 2>&1 | grep -i -A 3 -B 2 -E 'freefire|surfaceflinger|game' | head -n 100; echo '--- MEMINFO ---'; dumpsys meminfo com.dts.freefireth 2>&1 | head -n 100")
-            section("09 — MÉTRICAS DE FRAMES / GFXINFO",
-                "dumpsys gfxinfo com.dts.freefireth 2>&1 | head -n 260; echo '--- SURFACEFLINGER TIMESTATS ---'; dumpsys SurfaceFlinger --timestats -dump 2>&1 | head -n 220; echo '--- SUPORTE LATENCY ---'; dumpsys SurfaceFlinger --help 2>&1 | grep -iE 'latency|timestats|frame' | head -n 80")
+            section("09 — MÉTRICAS DE FRAMES / GFXINFO",                "dumpsys gfxinfo com.dts.freefireth 2>&1 | head -n 260; echo '--- SURFACEFLINGER TIMESTATS ---'; dumpsys SurfaceFlinger --timestats -dump 2>&1 | head -n 220; echo '--- SUPORTE LATENCY ---'; dumpsys SurfaceFlinger --help 2>&1 | grep -iE 'latency|timestats|frame' | head -n 80")
             section("10 — TEMPERATURA / ENERGIA / THROTTLING",
                 "dumpsys thermalservice 2>&1 | head -n 180; echo '--- POWER ---'; dumpsys power 2>&1 | grep -iE 'low.?power|power.?save|thermal|mode|interactive|battery' | head -n 160; echo '--- BATTERY ---'; dumpsys battery 2>&1 | head -n 100; echo '--- CPUFREQ CPU0 CURRENT ---'; cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq 2>&1; echo '--- CPUFREQ CPU0 MAX ---'; cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq 2>&1; echo '--- KGSL GPU CURRENT ---'; cat /sys/class/kgsl/kgsl-3d0/devfreq/cur_freq 2>&1; echo '--- KGSL GPU MAX ---'; cat /sys/class/kgsl/kgsl-3d0/devfreq/max_freq 2>&1")
             section("11 — CONFIGURAÇÕES EXTERNAS DO JOGO",
