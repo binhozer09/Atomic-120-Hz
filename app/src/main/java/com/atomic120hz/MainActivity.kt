@@ -391,15 +391,23 @@ class MainActivity : Activity() {
                     }
                     return@execute
                 }
-                val before = AtomicShizukuClient.run("cmd display get-user-preferred-display-mode 2>&1")
-                val applied = AtomicShizukuClient.run("cmd display set-user-preferred-display-mode 1080 2460 90 0 2>&1")
-                val after = AtomicShizukuClient.run("cmd display get-user-preferred-display-mode 2>&1")
+                val displays = AtomicShizukuClient.run("cmd display get-displays -i 2>&1")
+                val displayId = Regex("\\d+").find(displays)?.value
+                    ?: throw IOException("Não foi possível identificar o display principal. Saída: $displays")
+                val sizeOutput = AtomicShizukuClient.run("wm size 2>&1")
+                val sizeMatch = Regex("(\\d+)x(\\d+)").find(sizeOutput)
+                    ?: throw IOException("Não foi possível identificar a resolução física. Saída: $sizeOutput")
+                val width = sizeMatch.groupValues[1]
+                val height = sizeMatch.groupValues[2]
+                val before = AtomicShizukuClient.run("cmd display get-user-preferred-display-mode $displayId 2>&1")
+                val applied = AtomicShizukuClient.run("cmd display set-user-preferred-display-mode $width $height 90 $displayId 2>&1")
+                val after = AtomicShizukuClient.run("cmd display get-user-preferred-display-mode $displayId 2>&1")
                 val state = AtomicShizukuClient.run("dumpsys display | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|mDisplayModeSpecs|userPreferredModeId|renderFrameRate' | head -n 55")
                 runOnUiThread {
                     diagnosticReport.text = "SOLICITAÇÃO NATIVA DE 90 HZ\\n" +
-                        "Comando do DisplayManager; não altera textos de diagnóstico nem desativa proteções térmicas.\\n\\n" +
+                        "Display detectado: $displayId\\nResolução física detectada: $width x $height\\n" +
                         "PREFERÊNCIA ANTERIOR:\\n$before\\n\\nRESULTADO DO COMANDO:\\n$applied\\n\\nPREFERÊNCIA APÓS A SOLICITAÇÃO:\\n$after\\n\\nESTADO REAL DO DISPLAY:\\n$state"
-                    status.text = "Solicitação enviada. Confira o estado real abaixo; o HyperOS ainda pode recusá-la ou limitar a 60 Hz."
+                    status.text = "Solicitação enviada ao display $displayId. Confira a taxa ativa abaixo; o HyperOS ainda pode limitar a 60 Hz."
                     refreshDisplayInfo()
                 }
             } catch (e: Exception) {
