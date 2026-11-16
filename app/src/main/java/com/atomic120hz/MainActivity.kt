@@ -704,55 +704,61 @@ class MainActivity : Activity() {
 
     private fun investigateAndroidFpsPolicy() {
         if (!hasShizukuPermission()) return
-        status.text = "Investigando políticas de FPS do Android e HyperOS (somente leitura)..."
+        status.text = "Identificando o perfil de compatibilidade do Free Fire e do dispositivo (somente leitura)..."
         worker.execute {
-            try {
-                val command = """
-                    echo '===== ATOMIC 120 HZ - POLITICAS ANDROID/HYPEROS ====='
-                    echo '===== 1. PACOTE E PROCESSO DO FREE FIRE ====='
-                    dumpsys package com.dts.freefireth | grep -iE 'versionName|versionCode|userId|targetSdk|enabled=' | head -n 35 || true
-                    echo '===== 2. POLITICA GAME MANAGER ====='
-                    dumpsys game_manager 2>&1 | grep -i -A 12 -B 5 -E 'com.dts.freefireth|game.?mode|intervention|fps|frame.?rate|downscale' | head -n 180 || true
-                    echo '===== 3. SERVICO GAME ====='
-                    dumpsys game 2>&1 | grep -i -A 12 -B 5 -E 'com.dts.freefireth|game.?mode|intervention|fps|frame.?rate|downscale' | head -n 180 || true
-                    echo '===== 4. COMANDOS GAME DISPONIVEIS ====='
-                    cmd game help 2>&1 | head -n 100 || true
-                    echo '===== 5. DEVICE CONFIG GAME OVERLAY ====='
-                    device_config get game_overlay com.dts.freefireth 2>&1 || true
-                    device_config list game_overlay 2>&1 | grep -i -A 3 -B 3 'com.dts.freefireth' | head -n 80 || true
-                    echo '===== 6. CONFIGURACOES GLOBAIS DE JOGOS E FPS ====='
-                    settings list global | grep -iE 'game|fps|frame|refresh|refresh_rate|power' | head -n 140 || true
-                    echo '===== 7. CONFIGURACOES SYSTEM DE DISPLAY ====='
-                    settings list system | grep -iE 'game|fps|frame|refresh|refresh_rate|miui|thermal' | head -n 140 || true
-                    echo '===== 8. CAMADAS DO FREE FIRE ====='
-                    dumpsys SurfaceFlinger --list 2>&1 | grep -iE 'freefire|FFMainActivity|SurfaceView' | head -n 100 || true
-                    echo '===== 9. TAXA ATIVA E LIMITADORES DO DISPLAY ====='
-                    dumpsys display 2>&1 | grep -iE -A 3 -B 3 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|mDisplayModeSpecs|mRefreshRateLimitations|mRefreshRateThrottling|thermal|low.?power|renderFrameRate|userPreferredModeId|supportedModes' | head -n 220 || true
-                    echo '===== 10. PROPRIEDADES DO FABRICANTE RELACIONADAS A JOGOS ====='
-                    getprop 2>/dev/null | grep -iE 'game|fps|frame.?rate|refresh|thermal|performance|power.?mode' | head -n 180 || true
-                    echo '===== 11. PACOTES DE OTIMIZACAO PRESENTES (SEM ALTERAR) ====='
-                    pm list packages | grep -iE 'game|securitycenter|performance|powerkeeper|thermal' | head -n 120 || true
-                    echo '===== 12. ESTADO TERMICO E ENERGIA ====='
-                    dumpsys thermalservice 2>&1 | head -n 100 || true
-                    dumpsys power 2>&1 | grep -iE 'low.?power|power.?save|thermal|mode|interactive' | head -n 100 || true
-                    echo '===== FIM - COLETA SOMENTE LEITURA ====='
-                """.trimIndent()
-                val output = AtomicShizukuClient.run(command).take(22000)
-                runOnUiThread {
-                    diagnosticReport.text = "INVESTIGAÇÃO DAS POLÍTICAS ANDROID/HYPEROS\n" +
-                        "Coleta somente leitura. Nenhum serviço, pacote ou configuração foi desativado ou alterado.\n\n" +
-                        output.ifBlank { "O sistema não retornou dados para esses itens." }
-                    status.text = "Investigação concluída. Copie o relatório completo e envie aqui."
-                }
+            fun read(command: String): String = try {
+                AtomicShizukuClient.run(command).ifBlank { "(sem saída)" }
             } catch (e: Exception) {
-                runOnUiThread {
-                    diagnosticReport.text = "Falha na investigação: " + e.message
-                    status.text = "Não foi possível concluir a investigação."
-                }
+                "BLOQUEADO/ERRO: " + (e.message ?: "sem detalhes")
+            }
+            val report = StringBuilder()
+            report.appendLine("===== ATOMIC 120 HZ — IDENTIFICAÇÃO DO PERFIL DO FREE FIRE =====")
+            report.appendLine("Coleta somente leitura. Nenhum arquivo, configuração, serviço ou proteção foi alterado.")
+            report.appendLine()
+            report.appendLine("===== 1. IDENTIDADE / VERSÃO / COMPATIBILIDADE DO PACOTE =====")
+            report.appendLine(read("dumpsys package com.dts.freefireth 2>&1 | grep -iE 'versionName|versionCode|targetSdk|isGame|appCategory|category|supportsPerformanceGameMode|supportsBatteryGameMode|game_mode_config|primaryCpuAbi|secondaryCpuAbi|codePath|splitNames|flags=' | head -n 140"))
+            report.appendLine()
+            report.appendLine("===== 2. DECLARAÇÃO DO JOGO NO ANDROID =====")
+            report.appendLine(read("cmd game list 2>&1; echo '--- GAME SERVICE ---'; dumpsys game 2>&1 | grep -i -A 14 -B 5 -E 'com.dts.freefireth|game.?mode|fps|frame.?rate|intervention' | head -n 180"))
+            report.appendLine()
+            report.appendLine("===== 3. PERFIL / INTERVENÇÕES CONFIGURADAS PELO SISTEMA =====")
+            report.appendLine("game_overlay do pacote: " + read("device_config get game_overlay com.dts.freefireth 2>&1"))
+            report.appendLine(read("device_config list game_overlay 2>&1 | grep -i -A 4 -B 3 'com.dts.freefireth' | head -n 100"))
+            report.appendLine(read("dumpsys game_manager 2>&1 | grep -i -A 14 -B 5 -E 'com.dts.freefireth|game.?mode|intervention|fps|frame.?rate|downscale' | head -n 180"))
+            report.appendLine()
+            report.appendLine("===== 4. IDENTIFICAÇÃO DO DISPOSITIVO / SOC / KERNEL =====")
+            report.appendLine(read("getprop ro.product.manufacturer; getprop ro.product.brand; getprop ro.product.model; getprop ro.product.device; getprop ro.product.board; getprop ro.board.platform; getprop ro.hardware; getprop ro.soc.manufacturer; getprop ro.soc.model; getprop ro.build.version.release; getprop ro.build.version.sdk; getprop ro.opengles.version; uname -a"))
+            report.appendLine()
+            report.appendLine("===== 5. GPU / RENDERIZADOR =====")
+            report.appendLine(read("dumpsys SurfaceFlinger 2>&1 | grep -iE 'GLES:|GL_VENDOR|GL_RENDERER|GPU|renderer|RenderEngine' | head -n 90"))
+            report.appendLine()
+            report.appendLine("===== 6. ARQUITETURA E BIBLIOTECAS NATIVAS INSTALADAS =====")
+            report.appendLine(read("dumpsys package com.dts.freefireth 2>&1 | grep -iE 'primaryCpuAbi|secondaryCpuAbi|nativeLibraryDir|splitNames|versionName|versionCode' | head -n 80; echo '--- APK SPLITS ---'; pm path com.dts.freefireth 2>&1"))
+            report.appendLine()
+            report.appendLine("===== 7. TAXAS SUPORTADAS E MODO ATIVO DO DISPLAY =====")
+            report.appendLine(read("dumpsys display 2>&1 | grep -iE -A 3 -B 3 'mActiveSfDisplayMode|mActiveRenderFrameRate|mActiveModeId|defaultModeId|defaultPeakRefreshRate|mDesiredDisplayModeSpecs|mDisplayModeSpecs|mRefreshRateLimitations|mRefreshRateThrottling|renderFrameRate|supportedModes' | head -n 200"))
+            report.appendLine()
+            report.appendLine("===== 8. POLÍTICAS DO FABRICANTE RELACIONADAS A JOGOS / FPS =====")
+            report.appendLine(read("getprop 2>/dev/null | grep -iE 'game|fps|frame.?rate|refresh|thermal|performance|power.?mode|gpu' | head -n 180"))
+            report.appendLine()
+            report.appendLine("===== 9. ESTADO TÉRMICO E ECONOMIA DE ENERGIA =====")
+            report.appendLine(read("dumpsys thermalservice 2>&1 | head -n 100; echo '--- POWER ---'; dumpsys power 2>&1 | grep -iE 'low.?power|power.?save|thermal|mode|interactive' | head -n 100"))
+            report.appendLine()
+            report.appendLine("===== 10. PROCESSO / CAMADAS DO FREE FIRE (SE ABERTO) =====")
+            report.appendLine(read("pidof com.dts.freefireth 2>&1; echo '--- SURFACES ---'; dumpsys SurfaceFlinger --list 2>&1 | grep -iE 'freefire|FFMainActivity|SurfaceView' | head -n 100"))
+            report.appendLine()
+            report.appendLine("===== COMO INTERPRETAR =====")
+            report.appendLine("A seção 1 verifica se o pacote se declara como jogo e se anuncia suporte aos modos de desempenho do Android.")
+            report.appendLine("A seção 3 mostra intervenções do Game Manager, distintas do perfil interno de compatibilidade da Garena.")
+            report.appendLine("As seções 4 a 6 identificam modelo, SoC, GPU e ABI, sinais que podem participar da compatibilidade.")
+            report.appendLine("Se o perfil interno da Garena vier de tabela remota ou código binário, esta coleta não prova sua regra exata.")
+            report.appendLine("Não tenta ler dados privados do jogo, contornar sandbox, alterar APK, assinatura, anti-cheat ou limites térmicos.")
+            runOnUiThread {
+                diagnosticReport.text = report.toString().take(24000)
+                status.text = "Identificação concluída. Copie o relatório completo e envie aqui para cruzarmos os sinais do perfil."
             }
         }
     }
-
     private fun force90Hz() {
         if (!hasShizukuPermission()) return
         status.text = "Salvando valores atuais e solicitando 90 Hz em todas as preferências compatíveis..."
