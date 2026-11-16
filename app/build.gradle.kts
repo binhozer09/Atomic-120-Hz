@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "com.atomic120hz"
-    compileSdk = 36
+    compileSdk = 37
     defaultConfig {
         applicationId = "com.atomic120hz"
         minSdk = 24
