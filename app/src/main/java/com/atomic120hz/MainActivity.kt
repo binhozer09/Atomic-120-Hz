@@ -180,7 +180,7 @@ class MainActivity : Activity() {
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    diagnosis.append("\n\nERRO AO EXECUTAR\n").append(e.message ?: "Falha")
+                    diagnosis.append("\n\nERRO AO EXECUTAR\n" + (e.message ?: "Falha"))
                     status.text = "Falha ao executar comandos pelo Shizuku."
                     busy = false; refreshShizuku()
                 }
