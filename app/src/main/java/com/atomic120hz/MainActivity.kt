@@ -24,7 +24,7 @@ class MainActivity : Activity() {
     private val worker = Executors.newSingleThreadExecutor()
 
     // Endpoint seguro: a chave da OpenAI fica somente no servidor, nunca no APK.
-    private val apiUrl = "https://atomic-120-hz-ai.vercel.app/api/analyze"
+    private val apiUrl = "https://atomic-120-hz-ai-binhozer09-2720.vercel.app/api/analyze"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
