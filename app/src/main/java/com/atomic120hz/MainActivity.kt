@@ -154,6 +154,8 @@ class MainActivity : Activity() {
         root.addView(space(8))
         root.addView(actionButton("INVESTIGAR POLÍTICAS DO ANDROID / HYPEROS") { investigateAndroidFpsPolicy() }, buttonParams(56))
         root.addView(space(8))
+        root.addView(actionButton("DIAGNÓSTICO COMPLETO — TODOS OS SETORES") { runCompleteFreeFireAudit() }, buttonParams(62))
+        root.addView(space(8))
         root.addView(actionButton("SOLICITAR 90 HZ (PRESERVA LIMITE TÉRMICO)") { force90Hz() }, buttonParams(58))
         root.addView(space(8))
         root.addView(actionButton("SOLICITAR MODO NATIVO DE DISPLAY 90 HZ") { requestNative90Hz() }, buttonParams(58))
@@ -759,6 +761,125 @@ class MainActivity : Activity() {
             }
         }
     }
+
+    /** Varredura unificada e somente leitura. */
+    private fun runCompleteFreeFireAudit() {
+        if (!hasShizukuPermission()) return
+        status.text = "Executando diagnóstico completo. Deixe o Free Fire aberto..."
+        worker.execute {
+            fun read(command: String): String = try {
+                AtomicShizukuClient.run(command).ifBlank { "(sem saída)" }
+            } catch (e: Exception) {
+                "INDISPONÍVEL/BLOQUEADO: " + (e.message ?: e.javaClass.simpleName)
+            }
+            val out = StringBuilder()
+            fun section(title: String, command: String) {
+                out.appendLine()
+                out.appendLine("========== " + title + " ==========")
+                out.appendLine(read(command))
+            }
+            out.appendLine("ATOMIC 120 HZ — DIAGNÓSTICO UNIFICADO DO FREE FIRE")
+            out.appendLine("Somente leitura. Não altera o jogo, APK, assinatura, anti-cheat, SELinux ou proteções térmicas.")
+            out.appendLine("Coleta pontual: mantenha o Free Fire aberto e, de preferência, em uma partida.")
+            section("01 — APARELHO / ANDROID / SOC",
+                "getprop ro.product.manufacturer; getprop ro.product.brand; getprop ro.product.model; getprop ro.product.device; getprop ro.product.board; getprop ro.board.platform; getprop ro.hardware; getprop ro.soc.manufacturer; getprop ro.soc.model; getprop ro.build.version.release; getprop ro.build.version.sdk; getprop ro.build.fingerprint; getprop ro.opengles.version; uname -a")
+            section("02 — PACOTE / VERSÃO / MANIFESTO / SPLITS",
+                "dumpsys package com.dts.freefireth 2>&1 | grep -iE 'versionName|versionCode|targetSdk|isGame|appCategory|category|supportsPerformanceGameMode|supportsBatteryGameMode|game_mode_config|primaryCpuAbi|secondaryCpuAbi|nativeLibraryDir|codePath|splitNames|dataDir|flags=' | head -n 180; echo '--- APK PATHS ---'; pm path com.dts.freefireth 2>&1")
+            section("03 — GAME MANAGER / MODOS / INTERVENÇÕES",
+                "cmd game list 2>&1; echo '--- GAME OVERLAY ---'; device_config get game_overlay com.dts.freefireth 2>&1; echo '--- GAME DUMP ---'; dumpsys game 2>&1 | grep -i -A 16 -B 5 -E 'com.dts.freefireth|game.?mode|fps|frame.?rate|intervention' | head -n 220; echo '--- GAME MANAGER ---'; dumpsys game_manager 2>&1 | grep -i -A 16 -B 5 -E 'com.dts.freefireth|game.?mode|intervention|fps|frame.?rate|downscale' | head -n 220; echo '--- DEVICE CONFIG ---'; device_config list game_overlay 2>&1 | grep -i -A 4 -B 3 'com.dts.freefireth' | head -n 100")
+            section("04 — SERVIÇOS / PACOTES DE JOGOS E FABRICANTE",
+                "echo '--- SERVICES ---'; service list 2>&1 | grep -iE 'game|booster|perf|power|thermal|display|refresh|miui|xiaomi|mediatek|mtk' | head -n 180; echo '--- DUMPSYS SERVICES ---'; dumpsys -l 2>&1 | grep -iE 'game|booster|perf|power|thermal|display|refresh|miui|xiaomi|mediatek|mtk' | head -n 180; echo '--- SYSTEM PACKAGES ---'; pm list packages -s 2>&1 | grep -iE 'game|booster|perf|power|thermal|display|refresh|miui|xiaomi|mediatek|mtk' | head -n 180")
+            section("05 — PROPRIEDADES HYPEROS / POLÍTICAS FPS",
+                "getprop 2>/dev/null | grep -iE 'game|fps|frame.?rate|refresh|thermal|performance|power.?mode|gpu|miui|xiaomi|mediatek|mtk' | head -n 240; echo '--- GAME OVERLAY CONFIG ---'; device_config list game_overlay 2>&1 | head -n 180")
+            section("06 — DISPLAY / MODOS / LIMITES ATIVOS",
+                "dumpsys display 2>&1 | grep -iE -A 4 -B 4 'mActiveSfDisplayMode|mActiveRenderFrameRate|mActiveModeId|defaultModeId|defaultPeakRefreshRate|mDesiredDisplayModeSpecs|mDisplayModeSpecs|mRefreshRateLimitations|mRefreshRateThrottling|renderFrameRate|supportedModes|thermal' | head -n 260; echo '--- SYSTEM SETTINGS ---'; settings list system 2>&1 | grep -iE 'refresh|fps|frame|miui|game|power' | head -n 120; echo '--- GLOBAL SETTINGS ---'; settings list global 2>&1 | grep -iE 'refresh|fps|frame|game|power' | head -n 120")
+            section("07 — GPU / OPENGL / SURFACEFLINGER / CAMADAS",
+                "dumpsys SurfaceFlinger 2>&1 | grep -iE 'GLES:|GL_VENDOR|GL_RENDERER|GPU|renderer|RenderEngine|refresh|frame.?rate|composition' | head -n 180; echo '--- LAYERS ---'; dumpsys SurfaceFlinger --list 2>&1 | grep -iE 'freefire|com.dts.freefireth|SurfaceView|Unity|Game' | head -n 160; echo '--- DISPLAY ID ---'; dumpsys SurfaceFlinger --display-id 2>&1 | head -n 80")
+            section("08 — PROCESSOS / PID / THREADS / CPU / MEMÓRIA",
+                "echo '--- PID ---'; pidof com.dts.freefireth 2>&1; echo '--- PROCESS LIST ---'; ps -A 2>&1 | grep -iE 'com.dts.freefireth|freefire|surfaceflinger|game|booster|perf|thermal' | head -n 180; echo '--- THREADS ---'; pgrep -f com.dts.freefireth 2>/dev/null | while read p; do echo PID=$p; ls /proc/$p/task 2>&1 | head -n 100; done; echo '--- CPUINFO ---'; dumpsys cpuinfo 2>&1 | grep -i -A 3 -B 2 -E 'freefire|surfaceflinger|game' | head -n 100; echo '--- MEMINFO ---'; dumpsys meminfo com.dts.freefireth 2>&1 | head -n 100")
+            section("09 — MÉTRICAS DE FRAMES / GFXINFO",
+                "dumpsys gfxinfo com.dts.freefireth 2>&1 | head -n 260; echo '--- SURFACEFLINGER TIMESTATS ---'; dumpsys SurfaceFlinger --timestats -dump 2>&1 | head -n 220; echo '--- SUPORTE LATENCY ---'; dumpsys SurfaceFlinger --help 2>&1 | grep -iE 'latency|timestats|frame' | head -n 80")
+            section("10 — TEMPERATURA / ENERGIA / THROTTLING",
+                "dumpsys thermalservice 2>&1 | head -n 180; echo '--- POWER ---'; dumpsys power 2>&1 | grep -iE 'low.?power|power.?save|thermal|mode|interactive|battery' | head -n 160; echo '--- BATTERY ---'; dumpsys battery 2>&1 | head -n 100; echo '--- CPU/GPU FREQ NODES ---'; for f in /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq /sys/class/kgsl/kgsl-3d0/devfreq/cur_freq /sys/class/kgsl/kgsl-3d0/devfreq/max_freq; do [ -r \"$f\" ] && echo \"$f=$(cat \"$f\")\"; done")
+            section("11 — CONFIGURAÇÕES EXTERNAS DO JOGO",
+                "for d in /sdcard/Android/data/com.dts.freefireth /sdcard/Android/obb/com.dts.freefireth; do echo ---\"$d\"---; ls -la \"$d\" 2>&1 | head -n 100; done; echo '--- CONFIG FILES ---'; find /sdcard/Android/data/com.dts.freefireth -type f -size -2M ! -path '*/cache/*' \\( -iname '*.ini' -o -iname '*.cfg' -o -iname '*.conf' -o -iname '*.json' -o -iname '*.xml' -o -iname '*.txt' -o -iname '*.config' -o -iname '*.properties' -o -iname '*.dat' \\) -print 2>&1 | head -n 180; echo '--- FPS TEXT HITS ---'; find /sdcard/Android/data/com.dts.freefireth -type f -size -2M ! -path '*/cache/*' \\( -iname '*.ini' -o -iname '*.cfg' -o -iname '*.conf' -o -iname '*.json' -o -iname '*.xml' -o -iname '*.txt' -o -iname '*.config' -o -iname '*.properties' -o -iname '*.dat' \\) -exec grep -IinE 'fps|frame.?rate|refresh.?rate|target.?frame|60[[:space:]]*fps|90[[:space:]]*fps' {} \\; 2>/dev/null | head -n 160")
+            out.appendLine()
+            out.appendLine("========== 12 — VARREDURA ESTÁTICA DOS APKs ==========")
+            try {
+                val info = packageManager.getApplicationInfo("com.dts.freefireth", 0)
+                val paths = (listOfNotNull(info.sourceDir) + (info.splitSourceDirs?.toList() ?: emptyList())).distinct()
+                val terms = Regex("(?i)fps|frame.?rate|refresh.?rate|target.?frame|target.?fps|high.?frame|frame.?limit|render.?rate|quality.?level")
+                val candidates = mutableListOf<String>()
+                val hits = mutableListOf<String>()
+                var entries = 0
+                var bytesScanned = 0L
+                val budget = 128L * 1024 * 1024
+                for ((index, path) in paths.withIndex()) {
+                    out.appendLine("APK " + (index + 1) + ": " + path + " (" + java.io.File(path).length() + " bytes)")
+                    java.util.zip.ZipFile(path).use { zip ->
+                        val all = zip.entries()
+                        while (all.hasMoreElements()) {
+                            val entry = all.nextElement()
+                            entries++
+                            if (entry.isDirectory) continue
+                            val name = entry.name
+                            val low = name.lowercase()
+                            val config = low.contains("config") || low.contains("resconf") || low.contains("setting") ||
+                                low.contains("quality") || low.contains("frame") || low.contains("fps") ||
+                                low.endsWith(".json") || low.endsWith(".xml") || low.endsWith(".ini") ||
+                                low.endsWith(".cfg") || low.endsWith(".conf") || low.endsWith(".properties")
+                            if (config && candidates.size < 160) candidates.add("APK " + (index + 1) + ": " + name + " (" + entry.size + " bytes)")
+                            val dex = low.endsWith(".dex")
+                            if ((!config && !dex) || entry.size !in 1..(8L * 1024 * 1024) || bytesScanned >= budget) continue
+                            val maxRead = minOf(entry.size, budget - bytesScanned, 8L * 1024 * 1024).toInt()
+                            if (maxRead <= 0) continue
+                            val data = zip.getInputStream(entry).use { input ->
+                                val buffer = java.io.ByteArrayOutputStream()
+                                val chunk = ByteArray(8192)
+                                var count = 0
+                                while (count < maxRead) {
+                                    val got = input.read(chunk, 0, minOf(chunk.size, maxRead - count))
+                                    if (got <= 0) break
+                                    buffer.write(chunk, 0, got)
+                                    count += got
+                                }
+                                buffer.toByteArray()
+                            }
+                            bytesScanned += data.size
+                            val content = String(data, Charsets.ISO_8859_1)
+                            val matches = terms.findAll(content).take(12).toList()
+                            if (matches.isNotEmpty()) {
+                                val contexts = matches.take(5).map { m ->
+                                    val from = (m.range.first - 90).coerceAtLeast(0)
+                                    val to = (m.range.last + 110).coerceAtMost(content.length)
+                                    content.substring(from, to).replace(Regex("[\\x00-\\x1F]+"), " ").replace(Regex("\\s+"), " ").trim().take(220)
+                                }.distinct()
+                                hits.add("APK " + (index + 1) + " [" + name + "]: " + contexts.joinToString(" || "))
+                            }
+                        }
+                    }
+                }
+                out.appendLine("APKs: " + paths.size + "; entradas ZIP: " + entries + "; bytes lidos: " + bytesScanned + " / orçamento " + budget + ".")
+                out.appendLine("--- RECURSOS CANDIDATOS ---")
+                candidates.forEach { out.appendLine(it) }
+                out.appendLine("--- REFERÊNCIAS TEXTUAIS ---")
+                if (hits.isEmpty()) out.appendLine("Nenhuma referência textual encontrada no conteúdo efetivamente lido.")
+                else hits.take(100).forEach { out.appendLine(it) }
+                out.appendLine("Dados binários/compactados e conteúdo além do orçamento podem exigir análise especializada; strings não provam limite ativo.")
+            } catch (e: Exception) {
+                out.appendLine("Falha na análise estática: " + e.javaClass.simpleName + ": " + e.message)
+            }
+            out.appendLine()
+            out.appendLine("========== LIMITES DA COLETA ==========")
+            out.appendLine("Resultados bloqueados/ausentes refletem permissões ou diferenças da ROM. O limitador pode estar no motor Unity, biblioteca nativa, configuração remota Garena, Game Manager, compositor ou driver; pode não existir um processo separado.")
+            out.appendLine("Não injeta código, não lê memória privada, não contorna sandbox e não modifica APK, anti-cheat, assinatura, SELinux ou proteção térmica.")
+            runOnUiThread {
+                diagnosticReport.text = out.toString().take(48000)
+                status.text = "Diagnóstico completo concluído. Toque em COPIAR RELATÓRIO e envie o texto aqui."
+            }
+        }
+    }
+
     private fun force90Hz() {
         if (!hasShizukuPermission()) return
         status.text = "Salvando valores atuais e solicitando 90 Hz em todas as preferências compatíveis..."
