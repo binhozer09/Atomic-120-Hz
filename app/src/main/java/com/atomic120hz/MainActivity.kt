@@ -383,7 +383,9 @@ class MainActivity : Activity() {
         status.text = "Consultando o comando oficial do DisplayManager..."
         worker.execute {
             try {
-                val help = AtomicShizukuClient.run("cmd display help 2>&1")
+                // Em algumas versões do HyperOS, "cmd display help" imprime a ajuda
+                // mas retorna código diferente de zero. Não deixar isso abortar o fluxo.
+                val help = AtomicShizukuClient.run("cmd display help 2>&1 || true")
                 val supported = help.contains("set-user-preferred-display-mode", ignoreCase = true)
                 if (!supported) {
                     runOnUiThread {
@@ -392,17 +394,17 @@ class MainActivity : Activity() {
                     }
                     return@execute
                 }
-                val displays = AtomicShizukuClient.run("cmd display get-displays -i 2>&1")
-                val displayId = Regex("\\d+").find(displays)?.value
-                    ?: throw IOException("Não foi possível identificar o display principal. Saída: $displays")
-                val sizeOutput = AtomicShizukuClient.run("wm size 2>&1")
-                val sizeMatch = Regex("(\\d+)x(\\d+)").find(sizeOutput)
-                    ?: throw IOException("Não foi possível identificar a resolução física. Saída: $sizeOutput")
+                // O ID do display é opcional no comando oficial; aplicar globalmente
+                // evita interpretar incorretamente a saída de get-displays.
+                val sizeOutput = AtomicShizukuClient.run("wm size 2>&1 || true")
+                val sizeMatch = Regex("(?im)^Physical size:\\s*(\\d+)x(\\d+)").find(sizeOutput)
+                    ?: Regex("(\\d+)x(\\d+)").find(sizeOutput)
+                    ?: throw IOException("Não foi possível identificar a resolução do aparelho. Saída: $sizeOutput")
                 val width = sizeMatch.groupValues[1]
                 val height = sizeMatch.groupValues[2]
-                val before = AtomicShizukuClient.run("cmd display get-user-preferred-display-mode $displayId 2>&1")
-                val applied = AtomicShizukuClient.run("cmd display set-user-preferred-display-mode $width $height 90 $displayId 2>&1")
-                val after = AtomicShizukuClient.run("cmd display get-user-preferred-display-mode $displayId 2>&1")
+                val before = AtomicShizukuClient.run("cmd display get-user-preferred-display-mode 2>&1 || true")
+                val applied = AtomicShizukuClient.run("cmd display set-user-preferred-display-mode $width $height 90 2>&1")
+                val after = AtomicShizukuClient.run("cmd display get-user-preferred-display-mode 2>&1 || true")
                 val state = AtomicShizukuClient.run("dumpsys display | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|mDisplayModeSpecs|userPreferredModeId|renderFrameRate' | head -n 55")
                 runOnUiThread {
                     diagnosticReport.text = "SOLICITAÇÃO NATIVA DE 90 HZ\\n" +
