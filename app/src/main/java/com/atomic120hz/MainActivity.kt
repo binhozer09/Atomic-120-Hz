@@ -256,6 +256,14 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun executeSafely(command: String): String {
+        return try {
+            AtomicAdbClient.execute(this, command)
+        } catch (e: Exception) {
+            "ERRO: " + (e.message ?: "falha desconhecida")
+        }
+    }
+
     private fun enableMode() {
         if (!adbConnected) {
             status.text = "Atomic Access ainda não está conectado. Faça o pareamento ADB primeiro."
@@ -307,22 +315,27 @@ class MainActivity : Activity() {
                     "device_config put game_overlay com.dts.freefireth mode=2,fps=90:mode=3,fps=90",
                     "cmd game mode performance com.dts.freefireth"
                 )
-                val commandResults = applyCommands.map { cmd -> cmd + " => " + AtomicAdbClient.execute(this, cmd) }
-                val secureUser = AtomicAdbClient.execute(this, "settings get secure user_refresh_rate").trim()
-                val secureMiui = AtomicAdbClient.execute(this, "settings get secure miui_refresh_rate").trim()
-                val peak = AtomicAdbClient.execute(this, "settings get system peak_refresh_rate").trim()
-                val min = AtomicAdbClient.execute(this, "settings get system min_refresh_rate").trim()
+                // HyperOS may deny WRITE_SECURE_SETTINGS even to the wireless ADB shell.
+                // Treat those OEM settings as optional and continue with the display service
+                // and Android Game Mode commands instead of aborting the whole operation.
+                val commandResults = applyCommands.map { cmd -> cmd + " => " + executeSafely(cmd) }
+                val secureUser = executeSafely("settings get secure user_refresh_rate").trim()
+                val secureMiui = executeSafely("settings get secure miui_refresh_rate").trim()
+                val peak = executeSafely("settings get system peak_refresh_rate").trim()
+                val min = executeSafely("settings get system min_refresh_rate").trim()
+                val preferredReadback = executeSafely("cmd display get-user-preferred-display-mode 0").trim()
                 val displayDump = AtomicAdbClient.execute(
                     this,
                     "echo FREE_FIRE_GAME_OVERLAY; device_config get game_overlay com.dts.freefireth; echo FREE_FIRE_GAME_CONFIGS; cmd game list-configs com.dts.freefireth; echo FREE_FIRE_GAME_MODES; cmd game list-modes com.dts.freefireth; echo DISPLAY_POLICY; dumpsys display | grep -i -E 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|PRIORITY_MIUI_REFRESH_RATE'; echo GAME_POLICY; dumpsys game"
                 )
-                val readbackOk = secureUser.toFloatOrNull()?.let { kotlin.math.abs(it - hz) < 1f } == true &&
-                    secureMiui.toFloatOrNull()?.let { kotlin.math.abs(it - hz) < 1f } == true &&
-                    peak.toFloatOrNull()?.let { kotlin.math.abs(it - hz) < 1f } == true &&
-                    min.toFloatOrNull()?.let { kotlin.math.abs(it - hz) < 1f } == true
+                val displayCommandResult = commandResults.firstOrNull { it.startsWith("cmd display set-user-preferred-display-mode") } ?: ""
+                val readbackOk = !displayCommandResult.contains("ERRO:") &&
+                    !preferredReadback.contains("ERRO:") &&
+                    !preferredReadback.contains("No user preferred display mode", ignoreCase = true) &&
+                    preferredReadback.isNotBlank()
                 val command = applyCommands.joinToString("; ")
                 val commandResult = commandResults.joinToString("\\n")
-                val preferred = "secure user_refresh_rate=$secureUser; secure miui_refresh_rate=$secureMiui; system peak_refresh_rate=$peak; system min_refresh_rate=$min"
+                val preferred = "display preferred mode=$preferredReadback; secure user_refresh_rate=$secureUser; secure miui_refresh_rate=$secureMiui; system peak_refresh_rate=$peak; system min_refresh_rate=$min"
 
                 runOnUiThread {
                     toggle.isEnabled = true
@@ -340,7 +353,7 @@ class MainActivity : Activity() {
                         enabled = false
                         toggle.text = "TENTAR APLICAR " + hz.toInt() + " Hz"
                         toggle.backgroundTintList = ColorStateList.valueOf(0xFF174568.toInt())
-                        status.text = "O Android não confirmou o modo preferido solicitado." +
+                        status.text = "O serviço de tela não confirmou o modo preferido solicitado." +
                             "\nComando: " + command +
                             "\nRetorno: " + commandResult +
                             "\nLeitura: " + preferred +
