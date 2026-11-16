@@ -29,6 +29,13 @@ class MainActivity : Activity() {
     private lateinit var disconnectButton: Button
     private val worker = Executors.newSingleThreadExecutor()
 
+    private val refreshSettings = listOf(
+        "system:peak_refresh_rate",
+        "system:min_refresh_rate",
+        "secure:user_refresh_rate",
+        "secure:miui_refresh_rate"
+    )
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = Color.rgb(5, 15, 29)
