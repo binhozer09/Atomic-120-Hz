@@ -132,6 +132,8 @@ class MainActivity : Activity() {
         root.addView(stepTitle("3. EXECUTAR OS COMANDOS"))
         executeButton = actionButton("EXECUTAR COMANDOS PARA 90 FPS") { applySelectedMode() }
         root.addView(executeButton, buttonParams(60))
+        root.addView(space(8))
+        root.addView(actionButton("VERIFICAR LIMITAÇÃO DO FREE FIRE") { diagnoseFreeFireLimit() }, buttonParams(52))
         root.addView(space(18))
 
         root.addView(stepTitle("4. DIAGNÓSTICO REAL DE FPS"))
@@ -248,6 +250,44 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     executeButton.isEnabled = true
                     status.text = "Falha ao executar: ${e.message}"
+                }
+            }
+        }
+    }
+
+    private fun diagnoseFreeFireLimit() {
+        if (!hasShizukuPermission()) return
+        status.text = "Verificando configurações do sistema e perfil do Free Fire..."
+        worker.execute {
+            try {
+                val command = """
+                    echo '=== PACOTE FREE FIRE ==='
+                    dumpsys package com.dts.freefireth | grep -iE 'versionName|versionCode|targetSdk' || true
+                    echo '=== TAXAS CONFIGURADAS ==='
+                    echo -n 'min_refresh_rate='; settings get system min_refresh_rate
+                    echo -n 'peak_refresh_rate='; settings get system peak_refresh_rate
+                    echo -n 'user_refresh_rate='; settings get system user_refresh_rate
+                    echo -n 'user_peak_refresh_rate='; settings get system user_peak_refresh_rate
+                    echo '=== PERFIL GAME OVERLAY ==='
+                    device_config get game_overlay com.dts.freefireth 2>&1 || true
+                    echo '=== JOGOS RECONHECIDOS PELO ANDROID ==='
+                    cmd game list 2>&1 || true
+                    echo '=== ESTADO DO DISPLAY ==='
+                    dumpsys display | grep -iE 'mActiveDisplayMode|mActiveSfDisplayMode|defaultModeId|defaultPeakRefreshRate|renderFrameRate|refreshRate' | head -n 45 || true
+                    echo '=== SERVICO DE JOGOS ==='
+                    dumpsys game 2>&1 | grep -i -A 5 -B 3 'com.dts.freefireth' | head -n 60 || true
+                """.trimIndent()
+                val output = AtomicShizukuClient.run(command).take(10000)
+                runOnUiThread {
+                    diagnosticReport.text = "VERIFICAÇÃO DO LIMITE DO FREE FIRE\n" +
+                        "Coleta somente leitura; nenhum arquivo ou configuração do jogo foi alterado.\n\n" +
+                        output.ifBlank { "O sistema não retornou dados para esses itens." }
+                    status.text = "Verificação concluída. Copie o relatório e envie aqui."
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    diagnosticReport.text = "Falha na verificação: \${e.message}"
+                    status.text = "Não foi possível concluir o diagnóstico."
                 }
             }
         }
