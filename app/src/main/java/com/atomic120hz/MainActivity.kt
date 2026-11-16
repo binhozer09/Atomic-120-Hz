@@ -303,13 +303,13 @@ class MainActivity : Activity() {
                     edit.putBoolean("saved", true).apply()
                 }
 
-                // HyperOS stores the selected refresh rate in both secure keys.
-                // Keep user_refresh_rate aligned with miui_refresh_rate; writing "1"
-                // can select a different policy instead of requesting 90 Hz.
-                val secureGrantResult = executeSafely("pm grant com.atomic120hz android.permission.WRITE_SECURE_SETTINGS; pm check-permission android.permission.WRITE_SECURE_SETTINGS com.atomic120hz")
-                val secureUserWritten = Settings.Secure.putString(contentResolver, "user_refresh_rate", hz.toInt().toString())
-                val secureMiuiWritten = Settings.Secure.putString(contentResolver, "miui_refresh_rate", hz.toInt().toString())
+                // Write secure refresh-rate keys through the already verified ADB shell.
+                // The app process itself does not hold WRITE_SECURE_SETTINGS; asking pm grant
+                // to grant it to this app is unnecessary for shell settings commands and can
+                // be blocked by OEM permission policy.
                 val applyCommands = listOf(
+                    "settings put secure user_refresh_rate ${hz.toInt()}",
+                    "settings put secure miui_refresh_rate ${hz.toInt()}",
                     "settings put system peak_refresh_rate ${hz.toFloat()}",
                     "settings put system min_refresh_rate ${hz.toFloat()}",
                     "cmd display set-user-preferred-display-mode ${matchingMode.physicalWidth} ${matchingMode.physicalHeight} ${matchingMode.refreshRate} 0",
@@ -320,8 +320,8 @@ class MainActivity : Activity() {
                 // Treat those OEM settings as optional and continue with the display service
                 // and Android Game Mode commands instead of aborting the whole operation.
                 val commandResults = applyCommands.map { cmd -> cmd + " => " + executeSafely(cmd) }
-                val secureUser = Settings.Secure.getString(contentResolver, "user_refresh_rate") ?: "null"
-                val secureMiui = Settings.Secure.getString(contentResolver, "miui_refresh_rate") ?: "null"
+                val secureUser = executeSafely("settings get secure user_refresh_rate").trim()
+                val secureMiui = executeSafely("settings get secure miui_refresh_rate").trim()
                 val peak = executeSafely("settings get system peak_refresh_rate").trim()
                 val min = executeSafely("settings get system min_refresh_rate").trim()
                 val preferredReadback = executeSafely("cmd display get-user-preferred-display-mode 0").trim()
@@ -330,7 +330,7 @@ class MainActivity : Activity() {
                     "echo FREE_FIRE_GAME_OVERLAY; device_config get game_overlay com.dts.freefireth; echo FREE_FIRE_GAME_CONFIGS; cmd game list-configs com.dts.freefireth; echo FREE_FIRE_GAME_MODES; cmd game list-modes com.dts.freefireth; echo DISPLAY_POLICY; dumpsys display | grep -i -E 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|PRIORITY_MIUI_REFRESH_RATE'; echo GAME_POLICY; dumpsys game"
                 )
                 val displayCommandResult = commandResults.firstOrNull { it.startsWith("cmd display set-user-preferred-display-mode") } ?: ""
-                val readbackOk = secureUserWritten && secureMiuiWritten &&
+                val readbackOk =
                     secureUser.toFloatOrNull()?.let { kotlin.math.abs(it - hz) < 1f } == true &&
                     secureMiui.toFloatOrNull()?.let { kotlin.math.abs(it - hz) < 1f } == true &&
                     !displayCommandResult.contains("ERRO:") &&
