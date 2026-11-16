@@ -293,10 +293,11 @@ class MainActivity : Activity() {
                     edit.putBoolean("saved", true).apply()
                 }
 
-                // HyperOS: user_refresh_rate is a mode selector (1 = custom/max),
-                // while miui_refresh_rate stores the selected Hz value.
+                // HyperOS stores the selected refresh rate in both secure keys.
+                // Keep user_refresh_rate aligned with miui_refresh_rate; writing "1"
+                // can select a different policy instead of requesting 90 Hz.
                 val applyCommands = listOf(
-                    "settings put secure user_refresh_rate 1",
+                    "settings put secure user_refresh_rate ${hz.toInt()}",
                     "settings put secure miui_refresh_rate ${hz.toInt()}",
                     "settings put system peak_refresh_rate ${hz.toFloat()}",
                     "settings put system min_refresh_rate ${hz.toFloat()}",
@@ -311,7 +312,7 @@ class MainActivity : Activity() {
                     this,
                     "dumpsys display | grep -i -E 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|PRIORITY_MIUI_REFRESH_RATE'; echo GAME_POLICY; dumpsys game"
                 )
-                val readbackOk = secureUser == "1" &&
+                val readbackOk = secureUser.toFloatOrNull()?.let { kotlin.math.abs(it - hz) < 1f } == true &&
                     secureMiui.toFloatOrNull()?.let { kotlin.math.abs(it - hz) < 1f } == true &&
                     peak.toFloatOrNull()?.let { kotlin.math.abs(it - hz) < 1f } == true &&
                     min.toFloatOrNull()?.let { kotlin.math.abs(it - hz) < 1f } == true
