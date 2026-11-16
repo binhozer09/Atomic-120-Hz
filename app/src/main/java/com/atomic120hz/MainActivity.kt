@@ -155,10 +155,10 @@ class MainActivity : Activity() {
             setPadding(dp(12), dp(12), dp(12), dp(12))
             setBackgroundColor(0xFF102943.toInt())
         }
-        root.addView(diagnosticReport, match())
-        root.addView(space(8))
-        diagnosticCopyButton = actionButton("COPIAR LOG COMPLETO") { copyDiagnosticLog() }
+        diagnosticCopyButton = actionButton("COPIAR RELATÓRIO") { copyDiagnosticLog() }
         root.addView(diagnosticCopyButton, buttonParams(52))
+        root.addView(space(8))
+        root.addView(diagnosticReport, match())
         root.addView(space(18))
 
         root.addView(stepTitle("FREQUÊNCIA DESEJADA"))
