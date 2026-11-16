@@ -257,37 +257,55 @@ class MainActivity : Activity() {
 
     private fun diagnoseFreeFireLimit() {
         if (!hasShizukuPermission()) return
-        status.text = "Verificando configurações do sistema e perfil do Free Fire..."
+        status.text = "Investigando políticas de FPS, Game Booster e camada do Free Fire..."
         worker.execute {
             try {
                 val command = """
-                    echo '=== PACOTE FREE FIRE ==='
-                    dumpsys package com.dts.freefireth | grep -iE 'versionName|versionCode|targetSdk' || true
-                    echo '=== TAXAS CONFIGURADAS ==='
-                    echo -n 'min_refresh_rate='; settings get system min_refresh_rate
-                    echo -n 'peak_refresh_rate='; settings get system peak_refresh_rate
-                    echo -n 'user_refresh_rate='; settings get system user_refresh_rate
-                    echo -n 'user_peak_refresh_rate='; settings get system user_peak_refresh_rate
-                    echo '=== PERFIL GAME OVERLAY ==='
+                    echo '=== 1. PACOTE E VERSAO ==='
+                    dumpsys package com.dts.freefireth | grep -iE 'versionName|versionCode|targetSdk|userId' || true
+
+                    echo '=== 2. TAXAS E POLITICAS DE TELA ==='
+                    for key in min_refresh_rate peak_refresh_rate user_refresh_rate user_peak_refresh_rate; do
+                      echo -n "$key="; settings get system "$key"
+                    done
+                    dumpsys display | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|mRefreshRateLimitations|mThermalRefreshRateThrottlingMap|renderFrameRate' | head -n 55
+
+                    echo '=== 3. PERFIL GAME OVERLAY DO FREE FIRE ==='
                     device_config get game_overlay com.dts.freefireth 2>&1 || true
-                    echo '=== JOGOS RECONHECIDOS PELO ANDROID ==='
-                    cmd game list 2>&1 || true
-                    echo '=== ESTADO DO DISPLAY ==='
-                    dumpsys display | grep -iE 'mActiveDisplayMode|mActiveSfDisplayMode|defaultModeId|defaultPeakRefreshRate|renderFrameRate|refreshRate' | head -n 45 || true
-                    echo '=== SERVICO DE JOGOS ==='
-                    dumpsys game 2>&1 | grep -i -A 5 -B 3 'com.dts.freefireth' | head -n 60 || true
+                    echo '=== 4. CONFIGURACOES GAME_OVERLAY DISPONIVEIS ==='
+                    device_config list game_overlay 2>&1 | grep -iE 'freefire|dts|fps' | head -n 60 || true
+
+                    echo '=== 5. COMANDOS GAME MANAGER SUPORTADOS NESTE ANDROID ==='
+                    cmd game help 2>&1 | head -n 100 || true
+                    echo '=== 6. SERVICO ANDROID GAME MANAGER ==='
+                    dumpsys game 2>&1 | grep -i -A 8 -B 5 'com.dts.freefireth' | head -n 100 || true
+
+                    echo '=== 7. SERVICOS E PACOTES DE GAME BOOSTER / XIAOMI ==='
+                    pm list packages | grep -iE 'game|booster|securitycenter|perf' | head -n 100 || true
+                    dumpsys activity services 2>&1 | grep -i -A 5 -B 3 -E 'gamebooster|game.boost|freefire|com.dts.freefireth' | head -n 140 || true
+
+                    echo '=== 8. AJUSTES DO SISTEMA RELACIONADOS A JOGOS E FPS ==='
+                    settings list system 2>&1 | grep -iE 'game|fps|refresh|frame|booster' | head -n 100 || true
+                    settings list secure 2>&1 | grep -iE 'game|fps|refresh|frame|booster' | head -n 100 || true
+                    settings list global 2>&1 | grep -iE 'game|fps|refresh|frame|booster' | head -n 100 || true
+
+                    echo '=== 9. CAMADAS GRAFICAS ATUAIS DO FREE FIRE ==='
+                    dumpsys SurfaceFlinger --list 2>&1 | grep -iE 'freefire|com.dts.freefireth|SurfaceView' | head -n 100 || true
+
+                    echo '=== 10. RESUMO DE LIMITES TERMICOS ==='
+                    dumpsys thermalservice 2>&1 | grep -iE 'status|temperature|severity|throttl' | head -n 70 || true
                 """.trimIndent()
-                val output = AtomicShizukuClient.run(command).take(10000)
+                val output = AtomicShizukuClient.run(command).take(18000)
                 runOnUiThread {
-                    diagnosticReport.text = "VERIFICAÇÃO DO LIMITE DO FREE FIRE\n" +
-                        "Coleta somente leitura; nenhum arquivo ou configuração do jogo foi alterado.\n\n" +
-                        output.ifBlank { "O sistema não retornou dados para esses itens." }
-                    status.text = "Verificação concluída. Copie o relatório e envie aqui."
+                    diagnosticReport.text = "INVESTIGAÇÃO DE QUEM LIMITA O FREE FIRE\n" +
+                        "Coleta somente leitura. Nenhuma configuração foi modificada.\n\n" +
+                        output.ifBlank { "O sistema não retornou dados para os itens consultados." }
+                    status.text = "Investigação concluída. Copie o relatório e envie aqui."
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    diagnosticReport.text = "Falha na verificação: " + e.message
-                    status.text = "Não foi possível concluir o diagnóstico."
+                    diagnosticReport.text = "Falha na investigação: " + e.message
+                    status.text = "Não foi possível concluir a investigação."
                 }
             }
         }
