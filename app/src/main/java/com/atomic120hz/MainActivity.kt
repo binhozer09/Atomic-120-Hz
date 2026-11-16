@@ -257,37 +257,80 @@ class MainActivity : Activity() {
 
     private fun diagnoseFreeFireLimit() {
         if (!hasShizukuPermission()) return
-        status.text = "Verificando configurações do sistema e perfil do Free Fire..."
+        status.text = "Investigando políticas de tela, energia, temperatura e perfil de jogo..."
+        diagnosticReport.text = "Coletando diagnóstico somente leitura..."
+        diagnosticCopyButton.isEnabled = false
         worker.execute {
             try {
                 val command = """
-                    echo '=== PACOTE FREE FIRE ==='
-                    dumpsys package com.dts.freefireth | grep -iE 'versionName|versionCode|targetSdk' || true
-                    echo '=== TAXAS CONFIGURADAS ==='
-                    echo -n 'min_refresh_rate='; settings get system min_refresh_rate
-                    echo -n 'peak_refresh_rate='; settings get system peak_refresh_rate
-                    echo -n 'user_refresh_rate='; settings get system user_refresh_rate
-                    echo -n 'user_peak_refresh_rate='; settings get system user_peak_refresh_rate
-                    echo '=== PERFIL GAME OVERLAY ==='
-                    device_config get game_overlay com.dts.freefireth 2>&1 || true
-                    echo '=== JOGOS RECONHECIDOS PELO ANDROID ==='
-                    cmd game list 2>&1 || true
-                    echo '=== ESTADO DO DISPLAY ==='
-                    dumpsys display | grep -iE 'mActiveDisplayMode|mActiveSfDisplayMode|defaultModeId|defaultPeakRefreshRate|renderFrameRate|refreshRate' | head -n 45 || true
-                    echo '=== SERVICO DE JOGOS ==='
-                    dumpsys game 2>&1 | grep -i -A 5 -B 3 'com.dts.freefireth' | head -n 60 || true
+                    echo '===== ATOMIC 120 HZ - INVESTIGACAO DO LIMITE DE FPS ====='
+                    echo 'Coleta somente leitura. Nenhuma configuracao sera alterada.'
+                    echo
+                    echo '===== 1. APARELHO E ANDROID ====='
+                    getprop ro.product.manufacturer
+                    getprop ro.product.model
+                    getprop ro.build.version.release
+                    getprop ro.build.version.sdk
+                    getprop ro.miui.ui.version.name
+                    getprop ro.build.version.incremental
+                    echo
+                    echo '===== 2. FREE FIRE INSTALADO ====='
+                    dumpsys package com.dts.freefireth | grep -iE 'versionName|versionCode|targetSdk|enabled=' | head -n 20
+                    echo
+                    echo '===== 3. TAXAS CONFIGURADAS (SYSTEM / SECURE / GLOBAL) ====='
+                    for ns in system secure global; do
+                      echo "--- $ns ---"
+                      for key in min_refresh_rate peak_refresh_rate user_refresh_rate user_peak_refresh_rate; do
+                        echo -n "$key="
+                        settings get "$ns" "$key" 2>&1
+                      done
+                    done
+                    echo
+                    echo '===== 4. POLITICA ATIVA DO DISPLAY ====='
+                    dumpsys display 2>&1 | grep -iE -C 4 'mDisplayModeSpecs|mDesiredDisplayModeSpecs|mActiveRenderFrameRate|mActiveSfDisplayMode|mDefaultModeId|defaultModeId|userPreferredModeId|renderFrameRate|RefreshRateData|defaultPeakRefreshRate|RefreshRateLimit|Throttling|BlockingZone|baseModeId|primary=' | head -n 240
+                    echo
+                    echo '===== 5. PERFIL DE JOGO / GAME OVERLAY ====='
+                    echo -n 'game_overlay Free Fire='
+                    device_config get game_overlay com.dts.freefireth 2>&1
+                    echo '--- game_overlay completo (linhas relacionadas) ---'
+                    device_config list game_overlay 2>&1 | grep -iE 'freefire|dts|fps|mode' | head -n 100
+                    echo '--- comandos game disponíveis ---'
+                    cmd game help 2>&1 | head -n 80
+                    echo '--- serviço Game ---'
+                    dumpsys game 2>&1 | grep -i -A 10 -B 5 'com.dts.freefireth' | head -n 120
+                    echo
+                    echo '===== 6. TEMPERATURA / THERMAL ====='
+                    dumpsys thermalservice 2>&1 | head -n 180
+                    echo
+                    echo '===== 7. ENERGIA / ECONOMIA ====='
+                    dumpsys power 2>&1 | grep -iE -C 3 'mIsPowered|mPlugType|mBatteryLevel|low.power|power.save|Battery Saver|mPowerSave|mDeviceIdle|thermal|brightness' | head -n 140
+                    echo
+                    echo '===== 8. SERVICOS DE JOGO, DISPLAY E FABRICANTE ====='
+                    dumpsys -l 2>&1 | grep -iE 'game|display|power|thermal|miui|perf|refresh|surface' | head -n 160
+                    echo
+                    echo '===== 9. PROPRIEDADES DO FABRICANTE RELACIONADAS A FPS ====='
+                    getprop 2>&1 | grep -iE 'refresh|fps|frame.?rate|game.?mode|thermal|perf|power.?save' | head -n 160
+                    echo
+                    echo '===== 10. JANELA / ATIVIDADE EM PRIMEIRO PLANO ====='
+                    dumpsys window 2>&1 | grep -iE 'mCurrentFocus|mFocusedApp' | head -n 20
+                    dumpsys activity activities 2>&1 | grep -iE 'topResumedActivity|mResumedActivity' | head -n 20
+                    echo
+                    echo '===== 11. CAMADAS DO SURFACEFLINGER COM FREE FIRE ====='
+                    dumpsys SurfaceFlinger --list 2>&1 | grep -iE 'freefire|dts.freefireth|SurfaceView' | head -n 100
+                    echo
+                    echo '===== FIM DO RELATORIO ====='
                 """.trimIndent()
-                val output = AtomicShizukuClient.run(command).take(10000)
+                val output = AtomicShizukuClient.run(command).take(24000)
                 runOnUiThread {
-                    diagnosticReport.text = "VERIFICAÇÃO DO LIMITE DO FREE FIRE\n" +
-                        "Coleta somente leitura; nenhum arquivo ou configuração do jogo foi alterado.\n\n" +
-                        output.ifBlank { "O sistema não retornou dados para esses itens." }
-                    status.text = "Verificação concluída. Copie o relatório e envie aqui."
+                    diagnosticReport.text = output.ifBlank { "O sistema não retornou dados." }
+                    diagnosticCopyButton.isEnabled = true
+                    status.text = "Investigação concluída. Toque em COPIAR RELATÓRIO e envie o texto aqui."
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    diagnosticReport.text = "Falha na verificação: " + e.message
-                    status.text = "Não foi possível concluir o diagnóstico."
+                    diagnosticReport.text = "Falha na investigação: \${e.message}"
+                    diagnosticCopyButton.isEnabled = true
+                    status.text = "Não foi possível concluir a investigação."
                 }
             }
         }
