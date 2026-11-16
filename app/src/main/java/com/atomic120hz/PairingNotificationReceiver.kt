@@ -25,7 +25,7 @@ class PairingNotificationReceiver : BroadcastReceiver() {
         }
 
         val pending = goAsync()
-        Executors.newSingleThreadExecutor().execute {
+        Thread {
             try {
                 AtomicPairingNotification.show(context, "Conectando ao ADB… mantenha a Depuração sem fio ativada.")
                 val result = AtomicAdbClient.pairConnectAndVerify(context.applicationContext, port, code)
@@ -35,6 +35,6 @@ class PairingNotificationReceiver : BroadcastReceiver() {
             } finally {
                 pending.finish()
             }
-        }
+        }.start()
     }
 }
