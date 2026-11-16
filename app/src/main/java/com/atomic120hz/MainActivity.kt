@@ -306,7 +306,18 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun copyDiagnosticLog() {\n        val report = diagnosticReport.text?.toString().orEmpty()\n        if (report.isBlank() || report == "O relatório aparecerá aqui.") {\n            status.text = "Gere o relatório primeiro para copiar o log."\n            return\n        }\n        val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager\n        clipboard.setPrimaryClip(ClipData.newPlainText("Atomic 120 Hz - Log FPS", report))\n        status.text = "Log copiado! Agora é só colar aqui na conversa."\n    }\n\n    private fun restoreSettings() {
+    private fun copyDiagnosticLog() {
+        val report = diagnosticReport.text?.toString().orEmpty()
+        if (report.isBlank() || report == "O relatório aparecerá aqui.") {
+            status.text = "Gere o relatório primeiro para copiar o log."
+            return
+        }
+        val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Atomic 120 Hz - Log FPS", report))
+        status.text = "Log copiado! Agora é só colar aqui na conversa."
+    }
+
+    private fun restoreSettings() {
         if (!hasShizukuPermission()) return
         toggle.isEnabled = false
         worker.execute {
