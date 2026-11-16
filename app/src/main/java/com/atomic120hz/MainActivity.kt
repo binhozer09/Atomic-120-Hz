@@ -174,7 +174,7 @@ class MainActivity : Activity() {
                     output.append("$ ").append(cmd).append("\n").append(runShell(cmd)).append("\n\n")
                 }
                 runOnUiThread {
-                    diagnosis.append("\n\nRESULTADO DA EXECUÇÃO\n").append(output.toString())
+                    diagnosis.append("\n\nRESULTADO DA EXECUÇÃO\n" + output.toString())
                     status.text = "Comandos enviados ao Shizuku. Confira as respostas do Android."
                     busy = false; refreshShizuku()
                 }
