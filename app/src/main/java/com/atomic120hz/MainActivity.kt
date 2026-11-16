@@ -329,6 +329,25 @@ class MainActivity : Activity() {
                     }
                 )
 
+                // Solicita o FPS padrão de jogos usado pelo override do SurfaceFlinger.
+                // É uma propriedade ro.*: tentativa por Shizuku e leitura de volta,
+                // sem afirmar sucesso quando a ROM bloquear a gravação.
+                output.appendLine()
+                output.appendLine("SURFACEFLINGER — GAME DEFAULT FRAME RATE OVERRIDE")
+                val gameOverrideBefore = run("getprop ro.surface_flinger.game_default_frame_rate_override").trim()
+                output.appendLine("Valor antes: ${gameOverrideBefore.ifBlank { "(vazio)" }}")
+                val gameOverrideAttempt = run("setprop ro.surface_flinger.game_default_frame_rate_override $selectedHz 2>&1")
+                output.appendLine("Tentativa para $selectedHz FPS: ${gameOverrideAttempt.ifBlank { "(sem mensagem)" }}")
+                val gameOverrideAfter = run("getprop ro.surface_flinger.game_default_frame_rate_override").trim()
+                output.appendLine("Valor depois: ${gameOverrideAfter.ifBlank { "(vazio)" }}")
+                output.appendLine(
+                    if (gameOverrideAfter == selectedHz.toString()) {
+                        "RESULTADO: valor $selectedHz confirmado pela leitura de volta."
+                    } else {
+                        "RESULTADO: o sistema não confirmou $selectedHz. A propriedade ro.* pode ser somente leitura após a inicialização; nenhuma partição ou arquivo do sistema foi alterado."
+                    }
+                )
+
                 output.appendLine()
                 output.appendLine("MODO NATIVO DO DISPLAY MANAGER")
                 val sizeOutput = run("wm size")
