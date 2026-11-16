@@ -15,6 +15,7 @@ object AtomicPairingNotification {
     const val INPUT_KEY = "atomic_pairing_input"
     const val ACTION_CONNECT = "com.atomic120hz.ACTION_CONNECT_ADB"
 
+    @Suppress("DEPRECATION")
     fun show(context: Context, message: String) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) {
@@ -48,7 +49,6 @@ object AtomicPairingNotification {
         val builder = if (Build.VERSION.SDK_INT >= 26) {
             Notification.Builder(context, CHANNEL_ID)
         } else {
-            @Suppress("DEPRECATION")
             Notification.Builder(context)
         }
         val notification = builder
