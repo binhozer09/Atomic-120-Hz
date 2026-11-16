@@ -40,7 +40,7 @@ object AtomicPairingNotification {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
         )
         val action = Notification.Action.Builder(
-            android.R.drawable.stat_sys_upload_done,
+            android.R.drawable.ic_menu_send,
             "CONECTAR",
             pendingIntent
         ).addRemoteInput(input).setAllowGeneratedReplies(false).build()
@@ -52,7 +52,7 @@ object AtomicPairingNotification {
             Notification.Builder(context)
         }
         val notification = builder
-            .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle("Atomic 120 Hz • Pareamento ADB")
             .setContentText(message)
             .setStyle(Notification.BigTextStyle().bigText(message + "\nNa resposta, digite: PORTA CÓDIGO (ex.: 37123 123456)."))
