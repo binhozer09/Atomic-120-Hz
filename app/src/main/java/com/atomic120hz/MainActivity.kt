@@ -276,31 +276,47 @@ class MainActivity : Activity() {
             try {
                 val prefs = getSharedPreferences("atomic_display_mode_backup", MODE_PRIVATE)
                 if (!prefs.getBoolean("saved", false)) {
-                    val previous = AtomicAdbClient.execute(this, "cmd display get-user-preferred-display-mode 0")
-                    val previousMode = previous.substringAfter(":", "").trim()
-                    prefs.edit()
-                        .putString("previous_mode", if (previousMode.isBlank() || previousMode.equals("null", true)) "__NULL__" else previousMode)
-                        .putBoolean("saved", true)
-                        .apply()
+                    val keys = listOf(
+                        "secure:user_refresh_rate",
+                        "secure:miui_refresh_rate",
+                        "system:peak_refresh_rate",
+                        "system:min_refresh_rate"
+                    )
+                    val edit = prefs.edit()
+                    for (entry in keys) {
+                        val parts = entry.split(":")
+                        val old = AtomicAdbClient.execute(this, "settings get ${parts[0]} ${parts[1]}").trim()
+                        edit.putString(entry, if (old.isBlank() || old == "null") "__NULL__" else old)
+                    }
+                    val previous = AtomicAdbClient.execute(this, "cmd display get-user-preferred-display-mode 0").trim()
+                    edit.putString("previous_mode", previous.substringAfter(":", "").trim().ifBlank { "__NULL__" })
+                    edit.putBoolean("saved", true).apply()
                 }
 
-                val width = matchingMode.physicalWidth
-                val height = matchingMode.physicalHeight
-                val refresh = matchingMode.refreshRate
-                val command = "cmd display set-user-preferred-display-mode $width $height $refresh 0"
-                val commandResult = AtomicAdbClient.execute(this, command)
-                val preferred = AtomicAdbClient.execute(this, "cmd display get-user-preferred-display-mode 0")
-                val expected = "$width $height"
-                val readbackOk = preferred.contains(expected) &&
-                    kotlin.math.abs((preferred.substringAfterLast(" ").trim().toFloatOrNull() ?: 0f) - refresh) < 1f
-                val displayDump = try {
-                    AtomicAdbClient.execute(
-                        this,
-                        "dumpsys display | grep -i -E 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|supportedRefreshRates|PRIORITY_MIUI_REFRESH_RATE' ; echo SECURE_SETTINGS; settings get secure user_refresh_rate; settings get secure miui_refresh_rate; echo POWERKEEPER; dumpsys activity services com.miui.powerkeeper | grep -i -E 'refresh|frame|rate|game' | head -40; echo GAME_POLICY; dumpsys game | head -100"
-                    )
-                } catch (e: Exception) {
-                    "Diagnóstico da tela indisponível: " + (e.message ?: "sem detalhes")
-                }
+                // HyperOS: user_refresh_rate is a mode selector (1 = custom/max),
+                // while miui_refresh_rate stores the selected Hz value.
+                val applyCommands = listOf(
+                    "settings put secure user_refresh_rate 1",
+                    "settings put secure miui_refresh_rate ${hz.toInt()}",
+                    "settings put system peak_refresh_rate ${hz.toFloat()}",
+                    "settings put system min_refresh_rate ${hz.toFloat()}",
+                    "cmd display set-user-preferred-display-mode ${matchingMode.physicalWidth} ${matchingMode.physicalHeight} ${matchingMode.refreshRate} 0"
+                )
+                val commandResults = applyCommands.map { cmd -> cmd + " => " + AtomicAdbClient.execute(this, cmd) }
+                val secureUser = AtomicAdbClient.execute(this, "settings get secure user_refresh_rate").trim()
+                val secureMiui = AtomicAdbClient.execute(this, "settings get secure miui_refresh_rate").trim()
+                val peak = AtomicAdbClient.execute(this, "settings get system peak_refresh_rate").trim()
+                val min = AtomicAdbClient.execute(this, "settings get system min_refresh_rate").trim()
+                val displayDump = AtomicAdbClient.execute(
+                    this,
+                    "dumpsys display | grep -i -E 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|PRIORITY_MIUI_REFRESH_RATE'; echo GAME_POLICY; dumpsys game"
+                )
+                val readbackOk = secureUser == "1" &&
+                    secureMiui.toFloatOrNull()?.let { kotlin.math.abs(it - hz) < 1f } == true &&
+                    peak.toFloatOrNull()?.let { kotlin.math.abs(it - hz) < 1f } == true &&
+                    min.toFloatOrNull()?.let { kotlin.math.abs(it - hz) < 1f } == true
+                val commandResult = commandResults.joinToString("\\n")
+                val preferred = "secure user_refresh_rate=$secureUser; secure miui_refresh_rate=$secureMiui; system peak_refresh_rate=$peak; system min_refresh_rate=$min"
 
                 runOnUiThread {
                     toggle.isEnabled = true
@@ -347,13 +363,22 @@ class MainActivity : Activity() {
             try {
                 val prefs = getSharedPreferences("atomic_display_mode_backup", MODE_PRIVATE)
                 if (prefs.getBoolean("saved", false)) {
-                    val original = prefs.getString("previous_mode", "__NULL__") ?: "__NULL__"
-                    val restoreCommand = if (original == "__NULL__") {
-                        "cmd display clear-user-preferred-display-mode 0"
-                    } else {
-                        "cmd display set-user-preferred-display-mode $original"
+                    val keys = listOf(
+                        "secure:user_refresh_rate",
+                        "secure:miui_refresh_rate",
+                        "system:peak_refresh_rate",
+                        "system:min_refresh_rate"
+                    )
+                    val restored = mutableListOf<String>()
+                    for (entry in keys) {
+                        val parts = entry.split(":")
+                        val old = prefs.getString(entry, "__NULL__") ?: "__NULL__"
+                        val cmd = if (old == "__NULL__") "settings delete ${parts[0]} ${parts[1]}" else "settings put ${parts[0]} ${parts[1]} $old"
+                        restored.add(cmd + " => " + AtomicAdbClient.execute(this, cmd))
                     }
-                    val restoreResult = AtomicAdbClient.execute(this, restoreCommand)
+                    val original = prefs.getString("previous_mode", "__NULL__") ?: "__NULL__"
+                    val restoreCommand = if (original == "__NULL__") "cmd display clear-user-preferred-display-mode 0" else "cmd display set-user-preferred-display-mode $original"
+                    restored.add(AtomicAdbClient.execute(this, restoreCommand))
                     prefs.edit().clear().apply()
                     runOnUiThread {
                         enabled = false
