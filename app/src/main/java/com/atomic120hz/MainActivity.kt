@@ -296,7 +296,12 @@ class MainActivity : Activity() {
                     echo '===== 4. POLITICA ATIVA DO DISPLAY ====='
                     dumpsys display 2>&1 | grep -iE -C 4 'mDisplayModeSpecs|mDesiredDisplayModeSpecs|mActiveRenderFrameRate|mActiveSfDisplayMode|mDefaultModeId|defaultModeId|userPreferredModeId|renderFrameRate|RefreshRateData|defaultPeakRefreshRate|RefreshRateLimit|Throttling|BlockingZone|baseModeId|primary=' | head -n 240
                     echo
-                    echo '===== 5. PERFIL DE JOGO / GAME OVERLAY ====='
+                    echo '===== 5. COMANDO NATIVO DE DISPLAY ====='
+                    cmd display help 2>&1 | head -n 70
+                    echo '--- preferencias completas de refresh ---'
+                    settings list system 2>&1 | grep -iE 'refresh|frame.?rate|fps|display' | head -n 80
+                    echo
+                    echo '===== 6. PERFIL DE JOGO / GAME OVERLAY ====='
                     echo -n 'game_overlay Free Fire='
                     device_config get game_overlay com.dts.freefireth 2>&1
                     echo '--- game_overlay linhas relacionadas ---'
@@ -306,28 +311,28 @@ class MainActivity : Activity() {
                     echo '--- serviço Game ---'
                     dumpsys game 2>&1 | grep -i -A 10 -B 5 'com.dts.freefireth' | head -n 120
                     echo
-                    echo '===== 6. TEMPERATURA / THERMAL ====='
+                    echo '===== 7. TEMPERATURA / THERMAL ====='
                     dumpsys thermalservice 2>&1 | head -n 180
                     echo
-                    echo '===== 7. ENERGIA / ECONOMIA ====='
+                    echo '===== 8. ENERGIA / ECONOMIA ====='
                     dumpsys power 2>&1 | grep -iE -C 3 'mIsPowered|mPlugType|mBatteryLevel|low.power|power.save|Battery Saver|mPowerSave|mDeviceIdle|thermal|brightness' | head -n 140
                     echo
-                    echo '===== 8. SERVICOS DE JOGO, DISPLAY E FABRICANTE ====='
+                    echo '===== 9. SERVICOS DE JOGO, DISPLAY E FABRICANTE ====='
                     dumpsys -l 2>&1 | grep -iE 'game|display|power|thermal|miui|perf|refresh|surface' | head -n 160
                     echo
-                    echo '===== 9. PROPRIEDADES DO FABRICANTE RELACIONADAS A FPS ====='
+                    echo '===== 10. PROPRIEDADES DO FABRICANTE RELACIONADAS A FPS ====='
                     getprop 2>&1 | grep -iE 'refresh|fps|frame.?rate|game.?mode|thermal|perf|power.?save' | head -n 160
                     echo
-                    echo '===== 10. JANELA / ATIVIDADE EM PRIMEIRO PLANO ====='
+                    echo '===== 11. JANELA / ATIVIDADE EM PRIMEIRO PLANO ====='
                     dumpsys window 2>&1 | grep -iE 'mCurrentFocus|mFocusedApp' | head -n 20
                     dumpsys activity activities 2>&1 | grep -iE 'topResumedActivity|mResumedActivity' | head -n 20
                     echo
-                    echo '===== 11. CAMADAS DO SURFACEFLINGER COM FREE FIRE ====='
+                    echo '===== 12. CAMADAS DO SURFACEFLINGER COM FREE FIRE ====='
                     dumpsys SurfaceFlinger --list 2>&1 | grep -iE 'freefire|dts.freefireth|SurfaceView' | head -n 100
                     echo
                     echo '===== FIM DO RELATORIO ====='
                 """.trimIndent()
-                val output = AtomicShizukuClient.run(command).take(24000)
+                val output = AtomicShizukuClient.run(command).take(50000)
                 runOnUiThread {
                     diagnosticReport.text = output.ifBlank { "O sistema não retornou dados." }
                     diagnosticCopyButton.isEnabled = true
