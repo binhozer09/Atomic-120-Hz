@@ -136,6 +136,8 @@ class MainActivity : Activity() {
         root.addView(actionButton("VERIFICAR LIMITAÇÃO DO FREE FIRE") { diagnoseFreeFireLimit() }, buttonParams(52))
         root.addView(space(8))
         root.addView(actionButton("INVESTIGAR POLÍTICAS DO ANDROID / HYPEROS") { investigateAndroidFpsPolicy() }, buttonParams(56))
+        root.addView(space(8))
+        root.addView(actionButton("FORÇAR 90 HZ (INCLUI LIMITE TÉRMICO)") { force90Hz() }, buttonParams(58))
         root.addView(space(18))
 
         root.addView(stepTitle("4. DIAGNÓSTICO REAL DE FPS"))
@@ -346,6 +348,33 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun force90Hz() {
+        if (!hasShizukuPermission()) return
+        status.text = "Salvando valores atuais e solicitando 90 Hz ao HyperOS..."
+        worker.execute {
+            try {
+                val keys = listOf("min_refresh_rate", "peak_refresh_rate", "user_refresh_rate", "miui_refresh_rate", "thermal_limit_refresh_rate")
+                val before = AtomicShizukuClient.run(keys.joinToString("\n") { "echo $it=$(settings get system $it)" })
+                val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
+                before.lineSequence().forEach { line ->
+                    val idx = line.indexOf('=')
+                    if (idx > 0) prefs.edit().putString(line.substring(0, idx), line.substring(idx + 1).trim()).apply()
+                }
+                val writes = keys.joinToString(" && ") { "settings put system $it 90" }
+                val result = AtomicShizukuClient.run("$writes && echo '--- VALORES APLICADOS ---' && " +
+                    keys.joinToString(" && ") { "echo $it=$(settings get system $it)" } +
+                    " && echo '--- DISPLAY ATIVO ---' && dumpsys display | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|mActiveModeId|mDesiredDisplayModeSpecs' | head -n 24")
+                runOnUiThread {
+                    status.text = "Solicitação de 90 Hz aplicada. O HyperOS ainda pode impor uma política de hardware/temperatura."
+                    diagnosticReport.text = "ATOMIC 120 HZ — SOLICITAÇÃO FORÇADA DE 90 HZ\n" +
+                        "Valores anteriores salvos para restauração. Não desativa proteções térmicas de CPU/GPU/bateria.\n\n" + result
+                }
+            } catch (e: Exception) {
+                runOnUiThread { status.text = "Falha ao solicitar 90 Hz: \${e.message}" }
+            }
+        }
+    }
+
     private fun startFpsDiagnostic() {
         if (!hasShizukuPermission()) return
         diagnosticStartButton.isEnabled = false
@@ -415,8 +444,21 @@ class MainActivity : Activity() {
         toggle.isEnabled = false
         worker.execute {
             try {
-                AtomicShizukuClient.run("settings delete system min_refresh_rate")
-                AtomicShizukuClient.run("settings delete system peak_refresh_rate")
+                val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
+                val keys = listOf("min_refresh_rate", "peak_refresh_rate", "user_refresh_rate", "miui_refresh_rate", "thermal_limit_refresh_rate")
+                val restoreCommands = keys.mapNotNull { key ->
+                    if (!prefs.contains(key)) null
+                    else {
+                        val old = prefs.getString(key, "null") ?: "null"
+                        if (old == "null") "settings delete system $key" else "settings put system $key $old"
+                    }
+                }
+                if (restoreCommands.isNotEmpty()) {
+                    AtomicShizukuClient.run(restoreCommands.joinToString(" && "))
+                    prefs.edit().clear().apply()
+                } else {
+                    AtomicShizukuClient.run("settings delete system min_refresh_rate && settings delete system peak_refresh_rate")
+                }
                 runOnUiThread {
                     enabled = false
                     toggle.isEnabled = true
