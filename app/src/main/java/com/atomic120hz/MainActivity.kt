@@ -392,7 +392,7 @@ class MainActivity : Activity() {
                     return@execute
                 }
                 val before = AtomicShizukuClient.run("cmd display get-user-preferred-display-mode 2>&1")
-                val applied = AtomicShizukuClient.run("cmd display set-user-preferred-display-mode 1080 2460 90 2>&1")
+                val applied = AtomicShizukuClient.run("cmd display set-user-preferred-display-mode 1080 2460 90 0 2>&1")
                 val after = AtomicShizukuClient.run("cmd display get-user-preferred-display-mode 2>&1")
                 val state = AtomicShizukuClient.run("dumpsys display | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|mDisplayModeSpecs|userPreferredModeId|renderFrameRate' | head -n 55")
                 runOnUiThread {
