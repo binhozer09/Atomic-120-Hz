@@ -688,7 +688,16 @@ class MainActivity : Activity() {
         val granted = alive && try { Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED } catch (_: Exception) { false }
         shizukuReady = granted
         updateConnectionUi()
-        if (!granted) status.text = "Conecte o Shizuku e autorize o Atomic antes de executar."
+        if (!granted) {
+            status.text = if (alive) {
+                "Solicitando autorização do Shizuku. Aceite a janela de permissão e toque novamente na função."
+            } else {
+                "Inicie o serviço Shizuku por Depuração sem fio antes de continuar."
+            }
+            if (alive) {
+                try { Shizuku.requestPermission(SHIZUKU_PERMISSION_CODE) } catch (_: Exception) { }
+            }
+        }
         return granted
     }
 
