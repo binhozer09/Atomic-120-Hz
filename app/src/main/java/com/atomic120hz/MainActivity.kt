@@ -260,10 +260,10 @@ class MainActivity : Activity() {
     private fun applySelectedMode() {
         if (!hasShizukuPermission()) return
         executeButton.isEnabled = false
-        status.text = "Ativando as preferências de $selectedHz Hz em uma única operação..."
+        status.text = "Aplicando as ativações de $selectedHz Hz..."
         worker.execute {
-            fun read(command: String): String = try {
-                AtomicShizukuClient.run(command).ifBlank { "(sem saída)" }
+            fun run(command: String): String = try {
+                AtomicShizukuClient.run(command).ifBlank { "OK" }
             } catch (e: Exception) {
                 "ERRO: ${e.message ?: "sem detalhes"}"
             }
@@ -275,85 +275,57 @@ class MainActivity : Activity() {
                     "user_peak_refresh_rate", "miui_refresh_rate"
                 )
 
-                // Guarda os valores originais apenas na primeira ativação, para permitir restauração.
+                // Backup dos valores originais para a função RESTAURAR.
                 for (key in systemKeys) {
                     if (!prefs.contains(key)) {
-                        prefs.edit().putString(key, read("settings get system $key").trim()).apply()
+                        prefs.edit().putString(key, run("settings get system $key").trim()).apply()
                     }
                 }
                 if (!prefs.contains("global_user_preferred_refresh_rate")) {
                     prefs.edit().putString(
                         "global_user_preferred_refresh_rate",
-                        read("settings get global user_preferred_refresh_rate").trim()
+                        run("settings get global user_preferred_refresh_rate").trim()
                     ).apply()
                 }
 
-                val report = StringBuilder()
-                report.appendLine("=== ATOMIC 120 HZ — ATIVAÇÃO UNIFICADA DE $selectedHz HZ ===")
-                report.appendLine("Solicitação integrada: preferências Android/HyperOS + modo nativo do Display Manager.")
-                report.appendLine("As proteções térmicas e os serviços do sistema não serão desativados.")
-                report.appendLine()
+                val output = StringBuilder()
+                output.appendLine("=== ATOMIC — ATIVAÇÃO DE $selectedHz HZ ===")
+                output.appendLine("Aplicando preferências de frequência; sem varredura ou diagnóstico do SurfaceFlinger.")
+                output.appendLine()
 
-                report.appendLine("1) PREFERÊNCIAS DE FREQUÊNCIA")
+                output.appendLine("PREFERÊNCIAS ANDROID / HYPEROS")
                 for (key in systemKeys) {
-                    val result = read("settings put system $key $selectedHz")
-                    val after = read("settings get system $key")
-                    report.appendLine("$key: retorno=$result | valor=$after")
+                    output.appendLine("$key: " + run("settings put system $key $selectedHz"))
                 }
-                val globalWrite = read("settings put global user_preferred_refresh_rate $selectedHz")
-                val globalAfter = read("settings get global user_preferred_refresh_rate")
-                report.appendLine("global user_preferred_refresh_rate: retorno=$globalWrite | valor=$globalAfter")
+                output.appendLine("user_preferred_refresh_rate: " +
+                    run("settings put global user_preferred_refresh_rate $selectedHz"))
 
-                report.appendLine()
-                report.appendLine("2) MODO NATIVO DO DISPLAY MANAGER")
-                val sizeOutput = read("wm size")
-                val sizeMatch = Regex("(?im)^Physical size:\\s*(\\d+)x(\\d+)").find(sizeOutput)
+                output.appendLine()
+                output.appendLine("MODO NATIVO DO DISPLAY MANAGER")
+                val sizeOutput = run("wm size")
+                val match = Regex("(?im)^Physical size:\\s*(\\d+)x(\\d+)").find(sizeOutput)
                     ?: Regex("(?m)^(\\d+)x(\\d+)$").find(sizeOutput)
-                if (sizeMatch != null) {
-                    val width = sizeMatch.groupValues[1]
-                    val height = sizeMatch.groupValues[2]
-                    val before = read("cmd display get-user-preferred-display-mode")
-                    val native = read("cmd display set-user-preferred-display-mode $width $height $selectedHz")
-                    val after = read("cmd display get-user-preferred-display-mode")
-                    report.appendLine("Resolução física detectada: $width x $height (não foi alterada).")
-                    report.appendLine("Preferência anterior: $before")
-                    report.appendLine("Comando nativo: $native")
-                    report.appendLine("Preferência após solicitação: $after")
+                if (match != null) {
+                    val width = match.groupValues[1]
+                    val height = match.groupValues[2]
+                    output.appendLine("Resolução preservada: $width x $height")
+                    output.appendLine(run("cmd display set-user-preferred-display-mode $width $height $selectedHz"))
                 } else {
-                    report.appendLine("Não foi possível ler a resolução física; comando nativo não executado.")
-                    report.appendLine(sizeOutput)
+                    output.appendLine("Modo nativo não aplicado: não foi possível obter a resolução física.")
+                    output.appendLine(sizeOutput)
                 }
-
-                report.appendLine()
-                report.appendLine("3) PERFIL DO FREE FIRE NO GAME MANAGER (LEITURA)")
-                report.appendLine("game_overlay: " + read("device_config get game_overlay com.dts.freefireth"))
-                report.appendLine(read("dumpsys game").lineSequence()
-                    .filter { it.contains("com.dts.freefireth", true) || it.contains("fps", true) }
-                    .take(35).joinToString("\\n").ifBlank { "(sem linhas correspondentes)" })
-
-                report.appendLine()
-                report.appendLine("4) SURFACEFLINGER — VERIFICAÇÃO")
-                report.appendLine(read("getprop ro.surface_flinger.enable_frame_rate_override"))
-                    .also { report.appendLine("ro.surface_flinger.enable_frame_rate_override=$it") }
-                report.appendLine("ro.surface_flinger.game_default_frame_rate_override=" +
-                    read("getprop ro.surface_flinger.game_default_frame_rate_override"))
-                report.appendLine("Nota: propriedades ro.* são somente leitura em produção; o Atomic apenas consulta esses valores.")
-                report.appendLine()
-
-                report.appendLine("5) ESTADO REAL DO DISPLAY")
-                report.appendLine(read("dumpsys display | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|mActiveModeId|mDesiredDisplayModeSpecs|mDisplayModeSpecs|renderFrameRate|mRefreshRateThrottling' | head -n 65"))
 
                 runOnUiThread {
                     executeButton.isEnabled = true
                     enabled = true
-                    diagnosticReport.text = report.toString().take(14000)
-                    status.text = "Solicitações de $selectedHz Hz concluídas. Confira no relatório a taxa realmente ativa."
+                    diagnosticReport.text = output.toString().take(7000)
+                    status.text = "Comandos de ativação de $selectedHz Hz executados. O HyperOS e o jogo ainda controlam seus limites internos."
                     refreshDisplayInfo()
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     executeButton.isEnabled = true
-                    status.text = "Falha na ativação integrada: ${e.message}"
+                    status.text = "Falha ao ativar $selectedHz Hz: ${e.message}"
                 }
             }
         }
