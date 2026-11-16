@@ -286,7 +286,7 @@ class MainActivity : Activity() {
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    diagnosticReport.text = "Falha na verificação: \${e.message}"
+                    diagnosticReport.text = "Falha na verificação: " + e.message
                     status.text = "Não foi possível concluir o diagnóstico."
                 }
             }
