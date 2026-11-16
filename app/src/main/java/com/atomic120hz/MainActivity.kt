@@ -134,6 +134,8 @@ class MainActivity : Activity() {
         root.addView(executeButton, buttonParams(60))
         root.addView(space(8))
         root.addView(actionButton("VERIFICAR LIMITAÇÃO DO FREE FIRE") { diagnoseFreeFireLimit() }, buttonParams(52))
+        root.addView(space(8))
+        root.addView(actionButton("INVESTIGAR POLÍTICAS DO ANDROID / HYPEROS") { investigateAndroidFpsPolicy() }, buttonParams(56))
         root.addView(space(18))
 
         root.addView(stepTitle("4. DIAGNÓSTICO REAL DE FPS"))
@@ -288,6 +290,57 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     diagnosticReport.text = "Falha na verificação: " + e.message
                     status.text = "Não foi possível concluir o diagnóstico."
+                }
+            }
+        }
+    }
+
+    private fun investigateAndroidFpsPolicy() {
+        if (!hasShizukuPermission()) return
+        status.text = "Investigando políticas de FPS do Android e HyperOS (somente leitura)..."
+        worker.execute {
+            try {
+                val command = """
+                    echo '===== ATOMIC 120 HZ - POLITICAS ANDROID/HYPEROS ====='
+                    echo '===== 1. PACOTE E PROCESSO DO FREE FIRE ====='
+                    dumpsys package com.dts.freefireth | grep -iE 'versionName|versionCode|userId|targetSdk|enabled=' | head -n 35 || true
+                    echo '===== 2. POLITICA GAME MANAGER ====='
+                    dumpsys game_manager 2>&1 | grep -i -A 12 -B 5 -E 'com.dts.freefireth|game.?mode|intervention|fps|frame.?rate|downscale' | head -n 180 || true
+                    echo '===== 3. SERVICO GAME ====='
+                    dumpsys game 2>&1 | grep -i -A 12 -B 5 -E 'com.dts.freefireth|game.?mode|intervention|fps|frame.?rate|downscale' | head -n 180 || true
+                    echo '===== 4. COMANDOS GAME DISPONIVEIS ====='
+                    cmd game help 2>&1 | head -n 100 || true
+                    echo '===== 5. DEVICE CONFIG GAME OVERLAY ====='
+                    device_config get game_overlay com.dts.freefireth 2>&1 || true
+                    device_config list game_overlay 2>&1 | grep -i -A 3 -B 3 'com.dts.freefireth' | head -n 80 || true
+                    echo '===== 6. CONFIGURACOES GLOBAIS DE JOGOS E FPS ====='
+                    settings list global | grep -iE 'game|fps|frame|refresh|refresh_rate|power' | head -n 140 || true
+                    echo '===== 7. CONFIGURACOES SYSTEM DE DISPLAY ====='
+                    settings list system | grep -iE 'game|fps|frame|refresh|refresh_rate|miui|thermal' | head -n 140 || true
+                    echo '===== 8. CAMADAS DO FREE FIRE ====='
+                    dumpsys SurfaceFlinger --list 2>&1 | grep -iE 'freefire|FFMainActivity|SurfaceView' | head -n 100 || true
+                    echo '===== 9. TAXA ATIVA E LIMITADORES DO DISPLAY ====='
+                    dumpsys display 2>&1 | grep -iE -A 3 -B 3 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|mDisplayModeSpecs|mRefreshRateLimitations|mRefreshRateThrottling|thermal|low.?power|renderFrameRate|userPreferredModeId|supportedModes' | head -n 220 || true
+                    echo '===== 10. PROPRIEDADES DO FABRICANTE RELACIONADAS A JOGOS ====='
+                    getprop 2>/dev/null | grep -iE 'game|fps|frame.?rate|refresh|thermal|performance|power.?mode' | head -n 180 || true
+                    echo '===== 11. PACOTES DE OTIMIZACAO PRESENTES (SEM ALTERAR) ====='
+                    pm list packages | grep -iE 'game|securitycenter|performance|powerkeeper|thermal' | head -n 120 || true
+                    echo '===== 12. ESTADO TERMICO E ENERGIA ====='
+                    dumpsys thermalservice 2>&1 | head -n 100 || true
+                    dumpsys power 2>&1 | grep -iE 'low.?power|power.?save|thermal|mode|interactive' | head -n 100 || true
+                    echo '===== FIM - COLETA SOMENTE LEITURA ====='
+                """.trimIndent()
+                val output = AtomicShizukuClient.run(command).take(22000)
+                runOnUiThread {
+                    diagnosticReport.text = "INVESTIGAÇÃO DAS POLÍTICAS ANDROID/HYPEROS\n" +
+                        "Coleta somente leitura. Nenhum serviço, pacote ou configuração foi desativado ou alterado.\n\n" +
+                        output.ifBlank { "O sistema não retornou dados para esses itens." }
+                    status.text = "Investigação concluída. Copie o relatório completo e envie aqui."
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    diagnosticReport.text = "Falha na investigação: " + e.message
+                    status.text = "Não foi possível concluir a investigação."
                 }
             }
         }
