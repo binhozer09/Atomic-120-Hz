@@ -315,11 +315,44 @@ class MainActivity : Activity() {
                     output.appendLine(sizeOutput)
                 }
 
+                // Diagnóstico pós-ativação: confirma valores gravados e o estado
+                // informado pelo Display Manager / SurfaceFlinger / Game Manager.
+                output.appendLine()
+                output.appendLine("=== CONFERÊNCIA DAS PREFERÊNCIAS GRAVADAS ===")
+                for (key in systemKeys) {
+                    output.appendLine("$key=" + run("settings get system $key"))
+                }
+                output.appendLine("global user_preferred_refresh_rate=" +
+                    run("settings get global user_preferred_refresh_rate"))
+
+                output.appendLine()
+                output.appendLine("=== PREFERÊNCIA DO DISPLAY MANAGER ===")
+                output.appendLine(run("cmd display get-user-preferred-display-mode 2>&1"))
+
+                output.appendLine()
+                output.appendLine("=== DISPLAY ATIVO / SURFACEFLINGER ===")
+                val displayState = run(
+                    "dumpsys display 2>&1 | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|mActiveModeId|defaultModeId|defaultPeakRefreshRate|renderFrameRate|supportedModes|mRefreshRateThrottling' | head -n 90"
+                )
+                output.appendLine(displayState)
+
+                output.appendLine()
+                output.appendLine("=== PERFIL DE FPS DO FREE FIRE (LEITURA) ===")
+                output.appendLine(run(
+                    "device_config get game_overlay com.dts.freefireth 2>&1; dumpsys game 2>&1 | grep -i -A 10 -B 4 'com.dts.freefireth' | head -n 70"
+                ))
+                output.appendLine()
+                output.appendLine("LEITURA DO RESULTADO:")
+                output.appendLine("- Preferências iguais a $selectedHz confirmam que os valores foram gravados.")
+                output.appendLine("- Display/SurfaceFlinger em $selectedHz confirma a frequência ativa do painel.")
+                output.appendLine("- Perfil do Game Manager é uma política configurada, não uma medição de FPS.")
+                output.appendLine("- Para verificar FPS real do jogo, mantenha o Free Fire aberto em partida durante a coleta; 90 Hz da tela não garante 90 FPS renderizados.")
+
                 runOnUiThread {
                     executeButton.isEnabled = true
                     enabled = true
-                    diagnosticReport.text = output.toString().take(7000)
-                    status.text = "Comandos de ativação de $selectedHz Hz executados. O HyperOS e o jogo ainda controlam seus limites internos."
+                    diagnosticReport.text = output.toString().take(12000)
+                    status.text = "Ativação executada e conferida. O relatório mostra o que foi gravado e o estado real informado pelo sistema."
                     refreshDisplayInfo()
                 }
             } catch (e: Exception) {
@@ -1094,7 +1127,7 @@ class MainActivity : Activity() {
         worker.execute {
             try {
                 val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
-                val keys = listOf("min_refresh_rate", "peak_refresh_rate", "user_refresh_rate", "miui_refresh_rate", "thermal_limit_refresh_rate")
+                val keys = listOf("min_refresh_rate", "peak_refresh_rate", "user_refresh_rate", "user_peak_refresh_rate", "miui_refresh_rate", "thermal_limit_refresh_rate")
                 val restoreCommands = keys.mapNotNull { key ->
                     if (!prefs.contains(key)) null
                     else {
