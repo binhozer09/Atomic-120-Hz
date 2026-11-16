@@ -45,6 +45,16 @@ class MainActivity : Activity() {
         ensurePairingNotification()
     }
 
+    override fun onResume() {
+        super.onResume()
+        adbConnected = AtomicAdbClient.isConnected(this)
+        if (::accessButton.isInitialized && adbConnected) {
+            accessButton.text = "CONECTADO"
+            disconnectButton.visibility = View.VISIBLE
+            status.text = "ADB conectado. O pareamento recebido pela notificação está ativo."
+        }
+    }
+
     override fun onDestroy() {
         worker.shutdown()
         super.onDestroy()
