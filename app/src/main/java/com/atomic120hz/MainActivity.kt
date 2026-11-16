@@ -229,74 +229,136 @@ class MainActivity : Activity() {
             status.text = "Atomic Access ainda não está conectado. Faça o pareamento ADB primeiro."
             return
         }
-        val mode = window.decorView.display?.supportedModes
-            ?.filter { kotlin.math.abs(it.refreshRate - selectedHz) < 2f }
-            ?.maxByOrNull { it.refreshRate }
-        if (mode == null) {
-            status.text = "Este aparelho não informou um modo de ${selectedHz.toInt()} Hz compatível."
+        val hz = selectedHz.toInt()
+        val supported = window.decorView.display?.supportedModes?.any {
+            kotlin.math.abs(it.refreshRate - selectedHz) < 2f
+        } == true
+        if (!supported) {
+            status.text = "Este aparelho não informou um modo de " + hz + " Hz compatível."
             return
         }
 
         toggle.isEnabled = false
-        status.text = "Solicitando ${selectedHz.toInt()} Hz pelo ADB..."
+        status.text = "Lendo valores originais e aplicando " + hz + " Hz..."
         worker.execute {
             try {
-                AtomicAdbClient.execute(this, "settings put system peak_refresh_rate ${selectedHz.toInt()}")
-                AtomicAdbClient.execute(this, "settings put system min_refresh_rate ${selectedHz.toInt()}")
-                val peak = AtomicAdbClient.execute(this, "settings get system peak_refresh_rate")
-                val min = AtomicAdbClient.execute(this, "settings get system min_refresh_rate")
+                val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
+                if (!prefs.getBoolean("saved", false)) {
+                    val editor = prefs.edit()
+                    refreshSettings.forEach { item ->
+                        val parts = item.split(":")
+                        val oldValue = AtomicAdbClient.execute(this, "settings get " + parts[0] + " " + parts[1])
+                        editor.putString(item, oldValue.trim())
+                    }
+                    editor.putBoolean("saved", true).apply()
+                }
+
+                val commands = listOf(
+                    "settings put system peak_refresh_rate " + hz + ".0",
+                    "settings put system min_refresh_rate " + hz + ".0",
+                    // Xiaomi/HyperOS builds may also use these Secure-table preferences.
+                    "settings put secure user_refresh_rate 1",
+                    "settings put secure miui_refresh_rate " + hz
+                )
+                commands.forEach { command -> AtomicAdbClient.execute(this, command) }
+
+                val values = refreshSettings.associateWith { item ->
+                    val parts = item.split(":")
+                    AtomicAdbClient.execute(this, "settings get " + parts[0] + " " + parts[1]).trim()
+                }
+                val displayDump = AtomicAdbClient.execute(
+                    this,
+                    "dumpsys display | grep -i -E 'mActiveSfDisplayMode|mActiveRenderFrameRate|peakRefreshRate|mDesiredDisplayModeSpecs' || true"
+                )
+                val valuesWritten =
+                    values["system:peak_refresh_rate"] == hz.toString() + ".0" &&
+                    values["system:min_refresh_rate"] == hz.toString() + ".0" &&
+                    values["secure:user_refresh_rate"] == "1" &&
+                    values["secure:miui_refresh_rate"] == hz.toString()
+                val activeMentionsTarget = displayDump.contains(hz.toString() + ".0")
+
                 runOnUiThread {
-                    val params = window.attributes
-                    params.preferredDisplayModeId = mode.modeId
-                    window.attributes = params
-                    enabled = true
                     toggle.isEnabled = true
-                    toggle.text = "LIGADO"
-                    toggle.backgroundTintList = ColorStateList.valueOf(0xFF087A58.toInt())
-                    status.text = "Comandos ADB executados. Limites lidos: mínimo $min Hz / máximo $peak Hz. Isso não garante FPS do jogo."
+                    if (valuesWritten) {
+                        enabled = true
+                        toggle.text = "RESTAURAR CONFIGURAÇÕES"
+                        toggle.backgroundTintList = ColorStateList.valueOf(0xFF087A58.toInt())
+                        status.text = "PREFERÊNCIAS GRAVADAS E CONFERIDAS (" + hz + " Hz)." +
+                            (if (activeMentionsTarget) " O relatório da tela também menciona " + hz + " Hz."
+                             else " A taxa ativa ainda não foi confirmada; confira o indicador de Hz do Android.") +
+                            "\n\nValores lidos:\n" +
+                            values.entries.joinToString("\n") { entry -> entry.key + " = " + entry.value } +
+                            "\n\nEstado da tela:\n" + displayDump
+                    } else {
+                        enabled = false
+                        toggle.text = "TENTAR APLICAR " + hz + " Hz"
+                        toggle.backgroundTintList = ColorStateList.valueOf(0xFF174568.toInt())
+                        status.text = "O Android não confirmou todos os valores. Não vou marcar como ativado." +
+                            "\n\nValores lidos:\n" +
+                            values.entries.joinToString("\n") { entry -> entry.key + " = " + entry.value } +
+                            "\n\nEstado da tela:\n" + displayDump
+                    }
                     refreshDisplayInfo()
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     toggle.isEnabled = true
-                    status.text = "Falha ao aplicar pelo ADB: ${e.message}"
+                    enabled = false
+                    toggle.text = "TENTAR APLICAR " + hz + " Hz"
+                    status.text = "FALHA AO EXECUTAR COMANDOS ADB: " + (e.message ?: "erro desconhecido")
                 }
             }
         }
     }
 
     private fun disableMode() {
+        if (!adbConnected) {
+            status.text = "Reconecte o ADB para restaurar as configurações anteriores."
+            return
+        }
         toggle.isEnabled = false
         worker.execute {
             try {
-                if (adbConnected) {
-                    AtomicAdbClient.execute(this, "settings delete system min_refresh_rate")
-                    AtomicAdbClient.execute(this, "settings delete system peak_refresh_rate")
+                val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
+                if (prefs.getBoolean("saved", false)) {
+                    refreshSettings.forEach { item ->
+                        val parts = item.split(":")
+                        val original = prefs.getString(item, "null") ?: "null"
+                        val command = if (original == "null") {
+                            "settings delete " + parts[0] + " " + parts[1]
+                        } else {
+                            "settings put " + parts[0] + " " + parts[1] + " '" + original + "'"
+                        }
+                        AtomicAdbClient.execute(this, command)
+                    }
+                    prefs.edit().clear().apply()
                 }
                 runOnUiThread {
-                    val params = window.attributes
-                    params.preferredDisplayModeId = 0
-                    window.attributes = params
                     enabled = false
                     toggle.isEnabled = true
-                    toggle.text = "DESLIGADO"
+                    toggle.text = "APLICAR " + selectedHz.toInt() + " Hz"
                     toggle.backgroundTintList = ColorStateList.valueOf(0xFF174568.toInt())
-                    status.text = "Preferências de frequência removidas."
+                    status.text = "Configurações anteriores restauradas."
                     refreshDisplayInfo()
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     toggle.isEnabled = true
-                    status.text = "Falha ao restaurar as preferências: ${e.message}"
+                    status.text = "Falha ao restaurar as configurações: " + (e.message ?: "erro desconhecido")
                 }
             }
         }
     }
 
     private fun choose(hz: Float) {
+        if (enabled) {
+            status.text = "Restaure as configurações atuais antes de escolher outra frequência."
+            return
+        }
         selectedHz = hz
+        toggle.text = "APLICAR " + hz.toInt() + " Hz"
         updateButtons()
-        status.text = "Selecionado: ${hz.toInt()} Hz. Atomic Access precisa estar conectado para aplicar."
+        status.text = "Selecionado: " + hz.toInt() + " Hz. Conecte o Atomic Access e aplique."
     }
 
     private fun refreshDisplayInfo() {
