@@ -34,6 +34,7 @@ class MainActivity : Activity() {
     private lateinit var diagnosticStopButton: Button
     private lateinit var diagnosticReport: TextView
     private lateinit var diagnosticCopyButton: Button
+    private lateinit var exploreFreeFireButton: Button
     private val worker = Executors.newSingleThreadExecutor()
     private val permissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
         if (requestCode == SHIZUKU_PERMISSION_CODE) {
@@ -135,6 +136,9 @@ class MainActivity : Activity() {
         root.addView(executeButton, buttonParams(60))
         root.addView(space(8))
         root.addView(actionButton("VERIFICAR LIMITAÇÃO DO FREE FIRE") { diagnoseFreeFireLimit() }, buttonParams(52))
+        exploreFreeFireButton = actionButton("EXPLORAR PASTAS DO FREE FIRE (LEITURA)") { exploreFreeFireStorage() }
+        root.addView(exploreFreeFireButton, buttonParams(56))
+        root.addView(space(8))
         root.addView(space(8))
         root.addView(actionButton("TENTAR 90 FPS NO FREE FIRE") { tryFreeFire90Fps() }, buttonParams(58))
         root.addView(space(8))
@@ -324,6 +328,56 @@ class MainActivity : Activity() {
                     report.toString().take(10000)
                 status.text = "Diagnóstico concluído. Confira os erros individuais no relatório."
                 refreshDisplayInfo()
+            }
+        }
+    }
+
+    private fun exploreFreeFireStorage() {
+        if (!hasShizukuPermission()) return
+        exploreFreeFireButton.isEnabled = false
+        status.text = "Inspecionando caminhos do Free Fire. Nenhum arquivo será alterado..."
+        worker.execute {
+            fun read(command: String): String = try {
+                AtomicShizukuClient.run(command).ifBlank { "(sem saída)" }
+            } catch (e: Exception) {
+                "BLOQUEADO/ERRO: \${e.message ?: "sem detalhes"}"
+            }
+
+            val report = StringBuilder()
+            report.appendLine("=== ATOMIC 120 HZ — EXPLORADOR FREE FIRE ===")
+            report.appendLine("Modo: SOMENTE LEITURA. Nenhum arquivo foi criado, apagado ou modificado.")
+            report.appendLine()
+            report.appendLine("=== PACOTE INSTALADO ===")
+            report.appendLine(read("dumpsys package com.dts.freefireth | grep -iE 'versionName|versionCode|codePath|dataDir|credentialProtectedDataDir|deviceProtectedDataDir|userId|targetSdk' | head -n 60"))
+            report.appendLine()
+            report.appendLine("=== CAMINHO DO APK ===")
+            report.appendLine(read("pm path com.dts.freefireth 2>&1"))
+            report.appendLine()
+            report.appendLine("=== PASTA PRIVADA DO APLICATIVO ===")
+            report.appendLine(read("ls -ld /data/user/0/com.dts.freefireth /data/data/com.dts.freefireth /data/user_de/0/com.dts.freefireth 2>&1"))
+            report.appendLine("Nota: 'Permission denied' é o isolamento normal do Android para dados privados.")
+            report.appendLine()
+            report.appendLine("=== DADOS EXTERNOS DO JOGO ===")
+            report.appendLine(read("ls -la /sdcard/Android/data/com.dts.freefireth 2>&1"))
+            report.appendLine()
+            report.appendLine("=== OBB / ARQUIVOS DE EXPANSÃO ===")
+            report.appendLine(read("ls -la /sdcard/Android/obb/com.dts.freefireth 2>&1"))
+            report.appendLine()
+            report.appendLine("=== ARQUIVOS VISÍVEIS (APENAS NOMES, ATÉ 3 NÍVEIS) ===")
+            report.appendLine(read("find /sdcard/Android/data/com.dts.freefireth -maxdepth 3 -type f 2>&1 | head -n 100"))
+            report.appendLine()
+            report.appendLine("=== PERMISSÕES DO PACOTE ===")
+            report.appendLine(read("cmd appops get com.dts.freefireth 2>&1 | head -n 80"))
+            report.appendLine()
+            report.appendLine("=== PROCESSO DO JOGO (SE ESTIVER ABERTO) ===")
+            report.appendLine(read("pidof com.dts.freefireth 2>&1"))
+            report.appendLine()
+            report.appendLine("=== RESULTADO ===")
+            report.appendLine("Este relatório mostra o que o Android permite ao Shizuku/UID shell enxergar. Não tenta obter root, invadir sandbox, contornar anti-cheat ou alterar dados protegidos.")
+            runOnUiThread {
+                exploreFreeFireButton.isEnabled = true
+                diagnosticReport.text = report.toString().take(14000)
+                status.text = "Exploração concluída. Confira quais caminhos estão acessíveis e quais foram bloqueados."
             }
         }
     }
