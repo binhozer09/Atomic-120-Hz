@@ -266,7 +266,7 @@ class MainActivity : Activity() {
 
                     echo '=== 2. TAXAS E POLITICAS DE TELA ==='
                     for key in min_refresh_rate peak_refresh_rate user_refresh_rate user_peak_refresh_rate; do
-                      echo -n "${'
+                      echo -n "${'$'}key="; settings get system "${'$'}key"
                     done
                     dumpsys display | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|mRefreshRateLimitations|mThermalRefreshRateThrottlingMap|renderFrameRate' | head -n 55
 
