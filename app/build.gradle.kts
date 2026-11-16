@@ -5,13 +5,13 @@ plugins {
 
 android {
     namespace = "com.atomic120hz"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         applicationId = "com.atomic120hz"
         minSdk = 24
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -29,9 +29,7 @@ android {
 }
 
 dependencies {
-    // ADB client próprio do Atomic: pareamento TLS e shell sem depender do app Shizuku.
-    // Kadb 1.2.1 mantém compatibilidade com compileSdk 35 / AGP 8.7.x.
-    implementation("com.flyfishxu:kadb:1.2.1")
-    // runBlocking usado no handshake de pareamento ADB.
+    // Kadb 2.1.5 alinha o protocolo ADB com o AOSP atual.
+    implementation("com.flyfishxu:kadb:2.1.5")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }
