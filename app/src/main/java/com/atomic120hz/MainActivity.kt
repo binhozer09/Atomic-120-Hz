@@ -140,6 +140,8 @@ class MainActivity : Activity() {
         exploreFreeFireButton = actionButton("EXPLORAR PASTAS DO FREE FIRE (LEITURA)") { exploreFreeFireStorage() }
         root.addView(exploreFreeFireButton, buttonParams(56))
         root.addView(space(8))
+        root.addView(actionButton("LOCALIZAR ARQUIVOS DE CONFIGURAÇÃO DE FPS") { locateFreeFireFpsFiles() }, buttonParams(58))
+        root.addView(space(8))
         autoFixButton = actionButton("ANALISAR E CORRIGIR AUTOMATICAMENTE") { runAutomaticDiagnosisAndRepair() }
         root.addView(autoFixButton, buttonParams(58))
         root.addView(space(8))
@@ -332,6 +334,55 @@ class MainActivity : Activity() {
                     report.toString().take(10000)
                 status.text = "Diagnóstico concluído. Confira os erros individuais no relatório."
                 refreshDisplayInfo()
+            }
+        }
+    }
+
+    private fun locateFreeFireFpsFiles() {
+        if (!hasShizukuPermission()) return
+        status.text = "Procurando configurações de FPS nos arquivos acessíveis do Free Fire..."
+        worker.execute {
+            try {
+                val command = """
+                    echo '=== ATOMIC 120 HZ — BUSCA DE CONFIGURAÇÕES DE FPS ==='
+                    echo 'MODO: SOMENTE LEITURA. Nenhum arquivo será alterado.'
+                    echo '=== PACOTE PRINCIPAL E SPLITS INSTALADOS ==='
+                    pm path com.dts.freefireth 2>&1
+                    echo '=== DIRETÓRIOS EXTERNOS ACESSÍVEIS ==='
+                    for d in /sdcard/Android/data/com.dts.freefireth/files /sdcard/Android/data/com.dts.freefireth; do
+                      if [ -d "$d" ]; then echo "ACESSÍVEL: $d"; else echo "INDISPONÍVEL: $d"; fi
+                    done
+                    echo '=== ARQUIVOS DE CONFIGURAÇÃO CANDIDATOS (CACHE EXCLUÍDO) ==='
+                    find /sdcard/Android/data/com.dts.freefireth -type f -size -2M \
+                      ! -path '*/cache/*' \
+                      \( -iname '*.ini' -o -iname '*.cfg' -o -iname '*.conf' -o -iname '*.json' -o -iname '*.xml' -o -iname '*.txt' -o -iname '*.config' -o -iname '*.properties' -o -iname '*.dat' \) \
+                      -print 2>&1 | head -n 160
+                    echo '=== REFERÊNCIAS A FPS / FRAME RATE NOS ARQUIVOS TEXTUAIS ==='
+                    find /sdcard/Android/data/com.dts.freefireth -type f -size -2M \
+                      ! -path '*/cache/*' \
+                      \( -iname '*.ini' -o -iname '*.cfg' -o -iname '*.conf' -o -iname '*.json' -o -iname '*.xml' -o -iname '*.txt' -o -iname '*.config' -o -iname '*.properties' -o -iname '*.dat' \) \
+                      -exec grep -IinE 'fps|frame.?rate|refresh.?rate|target.?frame|60[[:space:]]*fps|90[[:space:]]*fps' {} \; 2>/dev/null | head -n 180
+                    echo '=== ARQUIVOS PRINCIPAIS DO APK (SOMENTE CAMINHOS) ==='
+                    pm path com.dts.freefireth 2>&1
+                    echo 'NOTA: o APK principal é assinado; esta busca não o modifica nem tenta reempacotá-lo.'
+                    echo '=== FIM DA BUSCA ==='
+                """.trimIndent()
+                val output = AtomicShizukuClient.run(command).take(18000)
+                val found = output.contains("fps", true) || output.contains("frame", true) ||
+                    output.contains("refresh", true)
+                runOnUiThread {
+                    diagnosticReport.text = "BUSCA DE ARQUIVOS DE CONFIGURAÇÃO — FREE FIRE\n" +
+                        "A busca examinou somente arquivos externos acessíveis, ignorando o cache. Nenhum arquivo foi alterado.\n\n" +
+                        output.ifBlank { "O Android não retornou conteúdo para a busca." } +
+                        if (found) "\n\nATENÇÃO: referências encontradas precisam ser verificadas; uma ocorrência de texto não prova que controla o limite de FPS." else
+                            "\n\nNenhuma referência textual clara a FPS foi localizada nos arquivos acessíveis. Isso não prova que exista um limitador em arquivo; ele pode estar no código do APK, no servidor ou nas políticas do sistema."
+                    status.text = "Busca concluída. Confira os arquivos e as referências encontradas."
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    diagnosticReport.text = "Falha na busca de configurações: " + e.message
+                    status.text = "Não foi possível concluir a busca."
+                }
             }
         }
     }
