@@ -397,7 +397,8 @@ class MainActivity : Activity() {
                             if (limit <= 0) continue
                             val bytes = zip.getInputStream(entry).use { input ->
                                 val out = java.io.ByteArrayOutputStream()
-                                val buffer = ByteArray(8192)                                var readTotal = 0
+                                val buffer = ByteArray(8192)
+                                var readTotal = 0
                                 while (readTotal < limit) {
                                     val n = input.read(buffer, 0, minOf(buffer.size, limit - readTotal))
                                     if (n <= 0) break
