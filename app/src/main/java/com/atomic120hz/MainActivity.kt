@@ -245,7 +245,7 @@ class MainActivity : Activity() {
         status.text = "Salvando preferências e solicitando $selectedHz Hz nas camadas compatíveis..."
         worker.execute {
             try {
-                val systemKeys = listOf("min_refresh_rate", "peak_refresh_rate", "user_refresh_rate", "user_peak_refresh_rate", "miui_refresh_rate")
+                val systemKeys = listOf("min_refresh_rate", "peak_refresh_rate", "user_refresh_rate", "user_peak_refresh_rate", "miui_refresh_rate", "thermal_limit_refresh_rate")
                 val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
                 systemKeys.forEach { key ->
                     val old = AtomicShizukuClient.run("settings get system $key 2>&1 || true").trim()
@@ -369,7 +369,7 @@ class MainActivity : Activity() {
         status.text = "Salvando valores atuais e solicitando 90 Hz em todas as preferências compatíveis..."
         worker.execute {
             try {
-                val systemKeys = listOf("min_refresh_rate", "peak_refresh_rate", "user_refresh_rate", "user_peak_refresh_rate", "miui_refresh_rate")
+                val systemKeys = listOf("min_refresh_rate", "peak_refresh_rate", "user_refresh_rate", "user_peak_refresh_rate", "miui_refresh_rate", "thermal_limit_refresh_rate")
                 val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
                 systemKeys.forEach { key ->
                     val old = AtomicShizukuClient.run("settings get system $key 2>&1 || true").trim()
