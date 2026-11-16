@@ -8,7 +8,7 @@
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <application
+    <queries>\n        <package android:name="moe.shizuku.privileged.api" />\n    </queries>\n\n    <application
         android:name=".AtomicApplication"
         android:allowBackup="false"
         android:label="Atomic 120 Hz"
@@ -23,6 +23,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <receiver android:name=".PairingNotificationReceiver" android:exported="false" />
+        <provider\n            android:name="rikka.shizuku.ShizukuProvider"\n            android:authorities="${applicationId}.shizuku"\n            android:multiprocess="false"\n            android:enabled="true"\n            android:exported="true"\n            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
     </application>
 </manifest>
