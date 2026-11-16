@@ -306,6 +306,7 @@ class MainActivity : Activity() {
                 // HyperOS stores the selected refresh rate in both secure keys.
                 // Keep user_refresh_rate aligned with miui_refresh_rate; writing "1"
                 // can select a different policy instead of requesting 90 Hz.
+                val secureGrantResult = executeSafely("pm grant com.atomic120hz android.permission.WRITE_SECURE_SETTINGS; pm check-permission com.atomic120hz android.permission.WRITE_SECURE_SETTINGS")
                 val secureUserWritten = Settings.Secure.putString(contentResolver, "user_refresh_rate", hz.toInt().toString())
                 val secureMiuiWritten = Settings.Secure.putString(contentResolver, "miui_refresh_rate", hz.toInt().toString())
                 val applyCommands = listOf(
@@ -337,7 +338,7 @@ class MainActivity : Activity() {
                     preferredReadback.isNotBlank()
                 val command = applyCommands.joinToString("; ")
                 val commandResult = commandResults.joinToString("\\n")
-                val preferred = "display preferred mode=$preferredReadback; secure user_refresh_rate=$secureUser; secure miui_refresh_rate=$secureMiui; system peak_refresh_rate=$peak; system min_refresh_rate=$min"
+                val preferred = "ADB grant/check=$secureGrantResult; display preferred mode=$preferredReadback; secure user_refresh_rate=$secureUser; secure miui_refresh_rate=$secureMiui; system peak_refresh_rate=$peak; system min_refresh_rate=$min"
 
                 runOnUiThread {
                     toggle.isEnabled = true
