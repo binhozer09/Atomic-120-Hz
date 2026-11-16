@@ -292,7 +292,7 @@ class MainActivity : Activity() {
                 val preferred = AtomicAdbClient.execute(this, "cmd display get-user-preferred-display-mode")
                 val expected = "$width $height"
                 val readbackOk = preferred.contains(expected) &&
-                    kotlin.math.abs(preferred.substringAfterLast(" ").trim().toFloatOrNull() ?: 0f - refresh) < 1f
+                    kotlin.math.abs((preferred.substringAfterLast(" ").trim().toFloatOrNull() ?: 0f) - refresh) < 1f
                 val displayDump = try {
                     AtomicAdbClient.execute(
                         this,
