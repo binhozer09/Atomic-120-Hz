@@ -27,6 +27,9 @@ class MainActivity : Activity() {
     private lateinit var toggle: Button
     private lateinit var hz90: Button
     private lateinit var hz120: Button
+    private lateinit var diagnosticStartButton: Button
+    private lateinit var diagnosticStopButton: Button
+    private lateinit var diagnosticReport: TextView
     private val worker = Executors.newSingleThreadExecutor()
     private val permissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
         if (requestCode == SHIZUKU_PERMISSION_CODE) {
@@ -126,7 +129,31 @@ class MainActivity : Activity() {
         root.addView(stepTitle("3. EXECUTAR OS COMANDOS"))
         executeButton = actionButton("EXECUTAR COMANDOS PARA 90 FPS") { applySelectedMode() }
         root.addView(executeButton, buttonParams(60))
-        root.addView(space(16))
+        root.addView(space(18))
+
+        root.addView(stepTitle("4. DIAGNÓSTICO REAL DE FPS"))
+        root.addView(TextView(this).apply {
+            text = "Toque em INICIAR, volte ao Free Fire e jogue por cerca de 30 segundos. Depois volte ao Atomic e toque em FINALIZAR para gerar o relatório."
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setTextColor(0xFF9ABBD5.toInt())
+        }, match())
+        root.addView(space(8))
+        diagnosticStartButton = actionButton("INICIAR MEDIÇÃO") { startFpsDiagnostic() }
+        root.addView(diagnosticStartButton, buttonParams(52))
+        root.addView(space(8))
+        diagnosticStopButton = actionButton("FINALIZAR E MOSTRAR RELATÓRIO") { finishFpsDiagnostic() }
+        root.addView(diagnosticStopButton, buttonParams(52))
+        root.addView(space(8))
+        diagnosticReport = TextView(this).apply {
+            text = "O relatório aparecerá aqui."
+            textSize = 12f
+            setTextColor(0xFFE1EDF7.toInt())
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            setBackgroundColor(0xFF102943.toInt())
+        }
+        root.addView(diagnosticReport, match())
+        root.addView(space(18))
 
         root.addView(stepTitle("FREQUÊNCIA DESEJADA"))
         val choices = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
@@ -215,6 +242,59 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     executeButton.isEnabled = true
                     status.text = "Falha ao executar: ${e.message}"
+                }
+            }
+        }
+    }
+
+    private fun startFpsDiagnostic() {
+        if (!hasShizukuPermission()) return
+        diagnosticStartButton.isEnabled = false
+        diagnosticReport.text = "Iniciando captura do SurfaceFlinger..."
+        worker.execute {
+            try {
+                val output = AtomicShizukuClient.run("dumpsys SurfaceFlinger --timestats -clear && dumpsys SurfaceFlinger --timestats -enable")
+                runOnUiThread {
+                    diagnosticStartButton.isEnabled = true
+                    diagnosticReport.text = "MEDIÇÃO INICIADA. Agora volte ao Free Fire, jogue por aproximadamente 30 segundos e retorne ao Atomic. Depois toque em FINALIZAR.\\n\\n$output"
+                    status.text = "Captura ativa. Jogue por 30 segundos e volte para finalizar."
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    diagnosticStartButton.isEnabled = true
+                    diagnosticReport.text = "Não foi possível iniciar a captura: ${e.message}\\nSeu Android pode não oferecer essa opção do SurfaceFlinger."
+                }
+            }
+        }
+    }
+
+    private fun finishFpsDiagnostic() {
+        if (!hasShizukuPermission()) return
+        diagnosticStopButton.isEnabled = false
+        diagnosticReport.text = "Lendo os quadros capturados..."
+        worker.execute {
+            try {
+                val dump = AtomicShizukuClient.run("dumpsys SurfaceFlinger --timestats -dump")
+                try {
+                    AtomicShizukuClient.run("dumpsys SurfaceFlinger --timestats -disable")
+                } catch (_: Exception) { }
+                val report = dump.take(14000)
+                val gameMentioned = dump.contains("com.dts.freefireth", ignoreCase = true) ||
+                    dump.contains("freefire", ignoreCase = true)
+                runOnUiThread {
+                    diagnosticStopButton.isEnabled = true
+                    diagnosticReport.text = (if (gameMentioned) {
+                        "O relatório menciona o Free Fire. Confira as camadas e contagens abaixo.\\n\\n"
+                    } else {
+                        "O nome do Free Fire não apareceu claramente no relatório. Isso não prova ausência de captura; confira as camadas listadas.\\n\\n"
+                    }) + report
+                    status.text = "Diagnóstico finalizado. Envie uma captura deste relatório para análise."
+                }
+            } catch (e: Exception) {
+                try { AtomicShizukuClient.run("dumpsys SurfaceFlinger --timestats -disable") } catch (_: Exception) { }
+                runOnUiThread {
+                    diagnosticStopButton.isEnabled = true
+                    diagnosticReport.text = "Falha ao ler o relatório: ${e.message}"
                 }
             }
         }
