@@ -137,6 +137,7 @@ class MainActivity : Activity() {
         root.addView(executeButton, buttonParams(60))
         root.addView(space(8))
         root.addView(actionButton("VERIFICAR LIMITAÇÃO DO FREE FIRE") { diagnoseFreeFireLimit() }, buttonParams(52))
+        root.addView(actionButton("DIAGNÓSTICO COMPLETO: FPS + SISTEMA + JOGO") { runFullFreeFireDiagnosis() }, buttonParams(58))
         exploreFreeFireButton = actionButton("EXPLORAR PASTAS DO FREE FIRE (LEITURA)") { exploreFreeFireStorage() }
         root.addView(exploreFreeFireButton, buttonParams(56))
         root.addView(space(8))
@@ -532,6 +533,74 @@ class MainActivity : Activity() {
                 autoFixButton.isEnabled = true
                 diagnosticReport.text = report.toString().take(18000)
                 status.text = "Diagnóstico automático concluído. Veja o relatório e a verificação final."
+                refreshDisplayInfo()
+            }
+        }
+    }
+
+    /**
+     * Cruza perfil Game Manager, display, processo/camadas do jogo e estado térmico.
+     * Coleta somente leitura: nenhuma preferência ou arquivo é alterado.
+     */
+    private fun runFullFreeFireDiagnosis() {
+        if (!hasShizukuPermission()) return
+        status.text = "Executando diagnóstico completo do Free Fire (somente leitura)..."
+        diagnosticReport.text = "Coletando perfil do jogo, renderização, display e estado térmico..."
+        worker.execute {
+            fun read(label: String, command: String): String {
+                val value = try {
+                    AtomicShizukuClient.run(command).ifBlank { "(sem saída)" }
+                } catch (e: Exception) {
+                    "ERRO/BLOQUEADO: ${e.message ?: "sem detalhes"}"
+                }
+                return "=== $label ===\n$value\n"
+            }
+
+            val report = StringBuilder()
+            val pkg = read("1. PACOTE / VERSÃO / CAMINHO DO APK",
+                "dumpsys package com.dts.freefireth 2>&1 | grep -iE 'versionName|versionCode|targetSdk|codePath|dataDir|userId' | head -n 70; pm path com.dts.freefireth 2>&1")
+            report.append(pkg)
+
+            val process = read("2. PROCESSO DO JOGO",
+                "pidof com.dts.freefireth 2>&1; ps -A 2>&1 | grep -i '[c]om.dts.freefireth' | head -n 20")
+            report.append(process)
+
+            val overlay = read("3. GAME MANAGER / PERFIL DE FPS",
+                "device_config get game_overlay com.dts.freefireth 2>&1; dumpsys game_manager 2>&1 | grep -i -A 12 -B 5 -E 'com.dts.freefireth|fps|frame.?rate|game.?mode|intervention' | head -n 180; dumpsys game 2>&1 | grep -i -A 10 -B 5 -E 'com.dts.freefireth|fps|frame.?rate|mode' | head -n 140")
+            report.append(overlay)
+
+            val layers = read("4. CAMADAS DE RENDERIZAÇÃO DO FREE FIRE",
+                "dumpsys SurfaceFlinger --list 2>&1 | grep -iE 'freefire|FFMainActivity|SurfaceView|Unity' | head -n 100")
+            report.append(layers)
+
+            val display = read("5. DISPLAY ATIVO / TAXAS / LIMITADORES",
+                "dumpsys display 2>&1 | grep -iE -A 3 -B 3 'mActiveSfDisplayMode|mActiveRenderFrameRate|mActiveModeId|defaultModeId|defaultPeakRefreshRate|mDesiredDisplayModeSpecs|mDisplayModeSpecs|mRefreshRateLimitations|mRefreshRateThrottling|renderFrameRate|supportedModes' | head -n 220; echo '--- SETTINGS ---'; for k in min_refresh_rate peak_refresh_rate user_refresh_rate user_peak_refresh_rate miui_refresh_rate; do echo \"$k=$(settings get system $k 2>&1)\"; done")
+            report.append(display)
+
+            val thermal = read("6. ESTADO TÉRMICO / ECONOMIA DE ENERGIA (SOMENTE LEITURA)",
+                "dumpsys thermalservice 2>&1 | head -n 120; dumpsys power 2>&1 | grep -iE 'low.?power|power.?save|thermal|mode|interactive' | head -n 100")
+            report.append(thermal)
+
+            val apk = read("7. INSPEÇÃO SEGURA DO APK",
+                "pm path com.dts.freefireth 2>&1; ls -l $(pm path com.dts.freefireth 2>/dev/null | sed -n '1s/^package://p') 2>&1")
+            report.append(apk)
+            report.append("\n=== ANÁLISE AUTOMÁTICA DOS RESULTADOS ===\n")
+            val profile90 = Regex("(?i)(fps|frame.?rate)[^\n]{0,35}90|90[^\n]{0,35}(fps|frame.?rate)").containsMatchIn(overlay)
+            val display60 = Regex("(?i)(renderFrameRate|mActiveSfDisplayMode|defaultPeakRefreshRate)[^\n]{0,45}60(?:\\.0)?").containsMatchIn(display)
+            val thermalWarning = Regex("(?i)(SEVERE|CRITICAL|EMERGENCY|SHUTDOWN)").containsMatchIn(thermal)
+            report.appendLine(if (pkg.contains("package:", true) || pkg.contains("versionName", true)) "• Pacote: Free Fire localizado." else "• Pacote: não foi possível confirmar a instalação.")
+            report.appendLine(if (process.contains(Regex("\\b[1-9][0-9]*\\b"))) "• Processo: há indício de processo ativo; confirme que o jogo estava aberto durante a coleta." else "• Processo: não foi detectado com segurança nesta coleta.")
+            report.appendLine(if (profile90) "• Perfil Android: há referência a 90 FPS no perfil; isso não prova renderização real a 90 FPS." else "• Perfil Android: não foi localizada referência explícita a 90 FPS.")
+            report.appendLine(if (display60) "• Display: há referência a 60 Hz no estado reportado; isso pode limitar a apresentação, mas não identifica sozinho o limitador do jogo." else "• Display: esta coleta não confirmou um estado ativo de 60 Hz.")
+            report.appendLine(if (thermalWarning) "• Temperatura: o serviço reportou estado térmico elevado; a proteção térmica será preservada." else "• Temperatura: não foi identificado estado crítico explícito nesta saída.")
+            report.appendLine("• FPS real: este diagnóstico não inventa uma medição. Para medir quadros por segundo, use INICIAR MEDIÇÃO, jogue por 30 segundos e FINALIZAR.")
+            report.appendLine("• APK: metadados e caminho são verificados sem modificar, reempacotar ou contornar a proteção do jogo.")
+            report.appendLine("\n=== AÇÃO AUTOMÁTICA ===")
+            report.appendLine("Nenhuma configuração foi alterada: os dados atuais ainda não identificam uma chave de sistema segura que esteja limitando o Free Fire. Proteção térmica, SELinux e anti-cheat permanecem intactos.")
+
+            runOnUiThread {
+                diagnosticReport.text = report.toString().take(22000)
+                status.text = "Diagnóstico completo concluído. Copie o relatório para identificar a próxima correção."
                 refreshDisplayInfo()
             }
         }
