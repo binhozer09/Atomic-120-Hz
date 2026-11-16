@@ -35,6 +35,7 @@ class MainActivity : Activity() {
     private lateinit var diagnosticReport: TextView
     private lateinit var diagnosticCopyButton: Button
     private lateinit var exploreFreeFireButton: Button
+    private lateinit var inspectApkButton: Button
     private lateinit var autoFixButton: Button
     private val worker = Executors.newSingleThreadExecutor()
     private val permissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
@@ -141,6 +142,9 @@ class MainActivity : Activity() {
         root.addView(exploreFreeFireButton, buttonParams(56))
         root.addView(space(8))
         root.addView(actionButton("LOCALIZAR ARQUIVOS DE CONFIGURAÇÃO DE FPS") { locateFreeFireFpsFiles() }, buttonParams(58))
+        root.addView(space(8))
+        inspectApkButton = actionButton("ANALISAR APK DO FREE FIRE (SOMENTE LEITURA)") { inspectFreeFireApk() }
+        root.addView(inspectApkButton, buttonParams(58))
         root.addView(space(8))
         autoFixButton = actionButton("ANALISAR E CORRIGIR AUTOMATICAMENTE") { runAutomaticDiagnosisAndRepair() }
         root.addView(autoFixButton, buttonParams(58))
@@ -334,6 +338,98 @@ class MainActivity : Activity() {
                     report.toString().take(10000)
                 status.text = "Diagnóstico concluído. Confira os erros individuais no relatório."
                 refreshDisplayInfo()
+            }
+        }
+    }
+
+    /**
+     * Inspeciona a estrutura do APK instalado sem modificar, extrair para disco,
+     * reempacotar ou alterar assinatura/anti-cheat.
+     */
+    private fun inspectFreeFireApk() {
+        inspectApkButton.isEnabled = false
+        status.text = "Abrindo o APK instalado do Free Fire em modo somente leitura..."
+        worker.execute {
+            try {
+                val appInfo = packageManager.getApplicationInfo("com.dts.freefireth", 0)
+                val apkPath = appInfo.sourceDir
+                val keywords = Regex("(?i)fps|frame.?rate|refresh.?rate|target.?frame|target.?fps|high.?frame|90hz|120hz")
+                val report = StringBuilder()
+                report.appendLine("=== ATOMIC 120 HZ — ANÁLISE DO APK ===")
+                report.appendLine("MODO: SOMENTE LEITURA. Nenhum arquivo será alterado.")
+                report.appendLine("APK principal: $apkPath")
+                report.appendLine("Tamanho: ${java.io.File(apkPath).length()} bytes")
+                var scannedBytes = 0L
+                var scannedEntries = 0
+                val matches = mutableListOf<String>()
+                java.util.zip.ZipFile(apkPath).use { zip ->
+                    val entries = zip.entries()
+                    while (entries.hasMoreElements()) {
+                        val entry = entries.nextElement()
+                        scannedEntries++
+                        if (keywords.containsMatchIn(entry.name)) {
+                            matches.add("ARQUIVO: ${entry.name}")
+                        }
+                        if (!entry.isDirectory && entry.size in 1..(2L * 1024 * 1024) &&
+                            scannedBytes < 24L * 1024 * 1024 &&
+                            (entry.name.endsWith(".json", true) ||
+                             entry.name.endsWith(".xml", true) ||
+                             entry.name.endsWith(".ini", true) ||
+                             entry.name.endsWith(".cfg", true) ||
+                             entry.name.endsWith(".txt", true) ||
+                             entry.name.endsWith(".properties", true) ||
+                             entry.name.endsWith(".dex", true) ||
+                             entry.name.startsWith("assets/"))) {
+                            val remaining = (24L * 1024 * 1024 - scannedBytes).coerceAtLeast(0L)
+                            val limit = minOf(entry.size, remaining, 2L * 1024 * 1024).toInt()
+                            if (limit > 0) {
+                                val bytes = zip.getInputStream(entry).use { input ->
+                                    val out = java.io.ByteArrayOutputStream()
+                                    val buffer = ByteArray(8192)
+                                    var total = 0
+                                    while (total < limit) {
+                                        val n = input.read(buffer, 0, minOf(buffer.size, limit - total))
+                                        if (n <= 0) break
+                                        out.write(buffer, 0, n)
+                                        total += n
+                                    }
+                                    out.toByteArray()
+                                }
+                                scannedBytes += bytes.size
+                                val content = String(bytes, Charsets.ISO_8859_1)
+                                val found = keywords.findAll(content).take(8).map { it.value }.distinct().toList()
+                                if (found.isNotEmpty()) {
+                                    matches.add("POSSÍVEL REFERÊNCIA: ${entry.name} — ${found.joinToString(", ")}")
+                                }
+                            }
+                        }
+                    }
+                }
+                report.appendLine("Entradas ZIP examinadas: $scannedEntries")
+                report.appendLine("Conteúdo examinado: $scannedBytes bytes (limite de segurança: 24 MiB)")
+                report.appendLine()
+                report.appendLine("=== REFERÊNCIAS ENCONTRADAS ===")
+                if (matches.isEmpty()) {
+                    report.appendLine("Nenhuma referência textual clara a FPS foi encontrada nos arquivos examinados.")
+                } else {
+                    matches.take(100).forEach { report.appendLine(it) }
+                }
+                report.appendLine()
+                report.appendLine("=== LIMITAÇÕES ===")
+                report.appendLine("O APK pode conter configurações binárias, compactadas, criptografadas ou baixadas após a instalação.")
+                report.appendLine("Uma palavra 'fps' não prova que exista um limite modificável.")
+                report.appendLine("Esta versão não altera o APK, não muda sua assinatura e não toca no anti-cheat.")
+                runOnUiThread {
+                    inspectApkButton.isEnabled = true
+                    diagnosticReport.text = report.toString().take(16000)
+                    status.text = "Análise estrutural concluída. Confira o relatório; nenhum arquivo foi modificado."
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    inspectApkButton.isEnabled = true
+                    diagnosticReport.text = "Não foi possível analisar o APK instalado: ${e.message}\n\nO Android pode bloquear o acesso de leitura ao arquivo do pacote."
+                    status.text = "Falha ao abrir o APK do Free Fire."
+                }
             }
         }
     }
