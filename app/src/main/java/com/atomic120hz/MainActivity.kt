@@ -37,6 +37,7 @@ class MainActivity : Activity() {
     private lateinit var exploreFreeFireButton: Button
     private lateinit var inspectApkButton: Button
     private lateinit var autoFixButton: Button
+    private lateinit var boosterToggleButton: Button
     private val worker = Executors.newSingleThreadExecutor()
     private val permissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
         if (requestCode == SHIZUKU_PERMISSION_CODE) {
@@ -136,6 +137,15 @@ class MainActivity : Activity() {
         root.addView(stepTitle("3. EXECUTAR OS COMANDOS"))
         executeButton = actionButton("ATIVAR 90 FPS — APLICAÇÃO COMPLETA") { applySelectedMode() }
         root.addView(executeButton, buttonParams(60))
+        root.addView(space(8))
+        boosterToggleButton = actionButton("TESTAR MIUI BOOSTER — ATIVAR / DESATIVAR") { toggleMiuiBooster() }
+        root.addView(boosterToggleButton, buttonParams(54))
+        root.addView(TextView(this).apply {
+            text = "Teste reversível do serviço miuibooster. Não altera a propriedade persistente nem desativa proteções térmicas."
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setTextColor(0xFF9ABBD5.toInt())
+        }, match())
         root.addView(space(8))
         root.addView(actionButton("VERIFICAR LIMITAÇÃO DO FREE FIRE") { diagnoseFreeFireLimit() }, buttonParams(52))
         exploreFreeFireButton = actionButton("EXPLORAR PASTAS DO FREE FIRE (LEITURA)") { exploreFreeFireStorage() }
@@ -360,6 +370,55 @@ class MainActivity : Activity() {
                     executeButton.isEnabled = true
                     status.text = "Falha ao ativar $selectedHz Hz: ${e.message}"
                 }
+            }
+        }
+    }
+
+    private fun toggleMiuiBooster() {
+        if (!hasShizukuPermission()) return
+        boosterToggleButton.isEnabled = false
+        status.text = "Consultando o estado do MIUI Booster..."
+        worker.execute {
+            fun run(command: String): String = try {
+                AtomicShizukuClient.run(command).ifBlank { "(sem saída)" }
+            } catch (e: Exception) {
+                "ERRO: ${e.message ?: e.javaClass.simpleName}"
+            }
+
+            val before = run("getprop init.svc.miuibooster").trim()
+            val action = if (before.equals("running", true)) "stop" else "start"
+            val commandOutput = run("$action miuibooster")
+            // Consulta novamente o estado efetivo; não confia apenas na saída do comando.
+            val after = run("getprop init.svc.miuibooster").trim()
+            val persistentFlag = run("getprop persist.sys.enable_miui_booster").trim()
+            val binderState = run("service check miuiboosterservice").trim()
+
+            val result = buildString {
+                appendLine("=== TESTE DO MIUI BOOSTER ===")
+                appendLine("Estado antes: ${before.ifBlank { "indisponível" }}")
+                appendLine("Ação solicitada: ${action.uppercase()} miuibooster")
+                appendLine("Retorno do comando: $commandOutput")
+                appendLine("Estado depois: ${after.ifBlank { "indisponível" }}")
+                appendLine("persist.sys.enable_miui_booster (somente leitura): ${persistentFlag.ifBlank { "não informado" }}")
+                appendLine("Binder miuiboosterservice: ${binderState.ifBlank { "não informado" }}")
+                appendLine()
+                when {
+                    after.equals("running", true) && action == "start" ->
+                        appendLine("RESULTADO: o serviço aparece como iniciado.")
+                    after.equals("stopped", true) && action == "stop" ->
+                        appendLine("RESULTADO: o serviço aparece como parado.")
+                    before.equals(after, true) ->
+                        appendLine("RESULTADO: o estado não mudou. O HyperOS pode ter bloqueado a ação ou reiniciado o serviço.")
+                    else ->
+                        appendLine("RESULTADO: estado alterado ou em transição; confira novamente após alguns segundos.")
+                }
+                appendLine("A propriedade persistente não foi modificada. Nenhuma proteção térmica foi alterada.")
+            }
+
+            runOnUiThread {
+                boosterToggleButton.isEnabled = true
+                diagnosticReport.text = result
+                status.text = "Teste do MIUI Booster concluído. Confira o estado antes e depois no relatório."
             }
         }
     }
