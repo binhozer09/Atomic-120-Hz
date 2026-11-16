@@ -257,55 +257,37 @@ class MainActivity : Activity() {
 
     private fun diagnoseFreeFireLimit() {
         if (!hasShizukuPermission()) return
-        status.text = "Investigando políticas de FPS, Game Booster e camada do Free Fire..."
+        status.text = "Verificando configurações do sistema e perfil do Free Fire..."
         worker.execute {
             try {
                 val command = """
-                    echo '=== 1. PACOTE E VERSAO ==='
-                    dumpsys package com.dts.freefireth | grep -iE 'versionName|versionCode|targetSdk|userId' || true
-
-                    echo '=== 2. TAXAS E POLITICAS DE TELA ==='
-                    for key in min_refresh_rate peak_refresh_rate user_refresh_rate user_peak_refresh_rate; do
-                      echo -n "${'$'}key="; settings get system "${'$'}key"
-                    done
-                    dumpsys display | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|mRefreshRateLimitations|mThermalRefreshRateThrottlingMap|renderFrameRate' | head -n 55
-
-                    echo '=== 3. PERFIL GAME OVERLAY DO FREE FIRE ==='
+                    echo '=== PACOTE FREE FIRE ==='
+                    dumpsys package com.dts.freefireth | grep -iE 'versionName|versionCode|targetSdk' || true
+                    echo '=== TAXAS CONFIGURADAS ==='
+                    echo -n 'min_refresh_rate='; settings get system min_refresh_rate
+                    echo -n 'peak_refresh_rate='; settings get system peak_refresh_rate
+                    echo -n 'user_refresh_rate='; settings get system user_refresh_rate
+                    echo -n 'user_peak_refresh_rate='; settings get system user_peak_refresh_rate
+                    echo '=== PERFIL GAME OVERLAY ==='
                     device_config get game_overlay com.dts.freefireth 2>&1 || true
-                    echo '=== 4. CONFIGURACOES GAME_OVERLAY DISPONIVEIS ==='
-                    device_config list game_overlay 2>&1 | grep -iE 'freefire|dts|fps' | head -n 60 || true
-
-                    echo '=== 5. COMANDOS GAME MANAGER SUPORTADOS NESTE ANDROID ==='
-                    cmd game help 2>&1 | head -n 100 || true
-                    echo '=== 6. SERVICO ANDROID GAME MANAGER ==='
-                    dumpsys game 2>&1 | grep -i -A 8 -B 5 'com.dts.freefireth' | head -n 100 || true
-
-                    echo '=== 7. SERVICOS E PACOTES DE GAME BOOSTER / XIAOMI ==='
-                    pm list packages | grep -iE 'game|booster|securitycenter|perf' | head -n 100 || true
-                    dumpsys activity services 2>&1 | grep -i -A 5 -B 3 -E 'gamebooster|game.boost|freefire|com.dts.freefireth' | head -n 140 || true
-
-                    echo '=== 8. AJUSTES DO SISTEMA RELACIONADOS A JOGOS E FPS ==='
-                    settings list system 2>&1 | grep -iE 'game|fps|refresh|frame|booster' | head -n 100 || true
-                    settings list secure 2>&1 | grep -iE 'game|fps|refresh|frame|booster' | head -n 100 || true
-                    settings list global 2>&1 | grep -iE 'game|fps|refresh|frame|booster' | head -n 100 || true
-
-                    echo '=== 9. CAMADAS GRAFICAS ATUAIS DO FREE FIRE ==='
-                    dumpsys SurfaceFlinger --list 2>&1 | grep -iE 'freefire|com.dts.freefireth|SurfaceView' | head -n 100 || true
-
-                    echo '=== 10. RESUMO DE LIMITES TERMICOS ==='
-                    dumpsys thermalservice 2>&1 | grep -iE 'status|temperature|severity|throttl' | head -n 70 || true
+                    echo '=== JOGOS RECONHECIDOS PELO ANDROID ==='
+                    cmd game list 2>&1 || true
+                    echo '=== ESTADO DO DISPLAY ==='
+                    dumpsys display | grep -iE 'mActiveDisplayMode|mActiveSfDisplayMode|defaultModeId|defaultPeakRefreshRate|renderFrameRate|refreshRate' | head -n 45 || true
+                    echo '=== SERVICO DE JOGOS ==='
+                    dumpsys game 2>&1 | grep -i -A 5 -B 3 'com.dts.freefireth' | head -n 60 || true
                 """.trimIndent()
-                val output = AtomicShizukuClient.run(command).take(18000)
+                val output = AtomicShizukuClient.run(command).take(10000)
                 runOnUiThread {
-                    diagnosticReport.text = "INVESTIGAÇÃO DE QUEM LIMITA O FREE FIRE\n" +
-                        "Coleta somente leitura. Nenhuma configuração foi modificada.\n\n" +
-                        output.ifBlank { "O sistema não retornou dados para os itens consultados." }
-                    status.text = "Investigação concluída. Copie o relatório e envie aqui."
+                    diagnosticReport.text = "VERIFICAÇÃO DO LIMITE DO FREE FIRE\n" +
+                        "Coleta somente leitura; nenhum arquivo ou configuração do jogo foi alterado.\n\n" +
+                        output.ifBlank { "O sistema não retornou dados para esses itens." }
+                    status.text = "Verificação concluída. Copie o relatório e envie aqui."
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    diagnosticReport.text = "Falha na investigação: " + e.message
-                    status.text = "Não foi possível concluir a investigação."
+                    diagnosticReport.text = "Falha na verificação: " + e.message
+                    status.text = "Não foi possível concluir o diagnóstico."
                 }
             }
         }
@@ -405,3 +387,70 @@ class MainActivity : Activity() {
         if (!granted) status.text = "Conecte o Shizuku e autorize o Atomic antes de executar."
         return granted
     }
+
+    private fun openShizukuDownload() {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$SHIZUKU_PACKAGE")))
+        } catch (_: Exception) {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/download/")))
+        }
+    }
+
+    private fun choose(hz: Int) {
+        selectedHz = hz
+        executeButton.text = "EXECUTAR COMANDOS PARA $hz FPS"
+        updateButtons()
+        status.text = "Selecionado: $hz Hz. Conecte o Shizuku para aplicar."
+    }
+
+    private fun refreshDisplayInfo() {
+        val display = window.decorView.display
+        val modes = display?.supportedModes?.map { it.refreshRate.toInt().toString() }?.distinct()
+        val current = display?.refreshRate
+        detected.text = "FREQUÊNCIA REPORTADA\n" +
+            (current?.let { "${it.toInt()} Hz" } ?: "Indisponível") +
+            "\n\nModos informados: " + (modes?.joinToString(" / ")?.plus(" Hz") ?: "não disponíveis")
+    }
+
+    private fun updateConnectionUi() {
+        if (!::connectButton.isInitialized || !::executeButton.isInitialized) return
+        connectButton.text = if (shizukuReady) "SHIZUKU CONECTADO E AUTORIZADO" else "CONECTAR AO SHIZUKU / AUTORIZAR"
+        executeButton.isEnabled = shizukuReady
+        executeButton.alpha = if (shizukuReady) 1f else .55f
+    }
+
+    private fun updateButtons() {
+        if (!::hz90.isInitialized) return
+        hz90.alpha = if (selectedHz == 90) 1f else .55f
+        hz120.alpha = if (selectedHz == 120) 1f else .55f
+    }
+
+    private fun stepTitle(value: String) = TextView(this).apply {
+        text = value
+        textSize = 17f
+        gravity = Gravity.CENTER
+        setTextColor(0xFF55C9FF.toInt())
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+    }
+
+    private fun actionButton(label: String, action: () -> Unit) = Button(this).apply {
+        text = label
+        isAllCaps = false
+        setTextColor(Color.WHITE)
+        backgroundTintList = ColorStateList.valueOf(0xFF174568.toInt())
+        setOnClickListener { action() }
+    }
+
+    private fun buttonParams(height: Int) = LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.MATCH_PARENT, dp(height)
+    )
+
+    private fun space(height: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(height)) }
+    private fun match() = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+
+    companion object {
+        private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
+        private const val SHIZUKU_PERMISSION_CODE = 120
+    }
+}
