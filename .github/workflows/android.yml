@@ -1,4 +1,5 @@
 name: Atomic 120 Hz - Android APK
+# Rebuild trigger after automatic diagnostic module update
 
 on:
   workflow_dispatch:
