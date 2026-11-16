@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("com.android.application")
 }
@@ -16,7 +18,11 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
+    kotlin {
+        compilerOptions {
+            jvmTarget = JvmTarget.JVM_17
+        }
+    }
 
     // Bouncy Castle ships the same OSGi manifest in multiple JARs.
     // It is metadata, not required at Android runtime.
