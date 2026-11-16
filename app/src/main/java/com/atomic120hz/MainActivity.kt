@@ -289,7 +289,7 @@ class MainActivity : Activity() {
                 val refresh = matchingMode.refreshRate
                 val command = "cmd display set-user-preferred-display-mode $width $height $refresh 0"
                 val commandResult = AtomicAdbClient.execute(this, command)
-                val preferred = AtomicAdbClient.execute(this, "cmd display get-user-preferred-display-mode")
+                val preferred = AtomicAdbClient.execute(this, "cmd display get-user-preferred-display-mode 0")
                 val expected = "$width $height"
                 val readbackOk = preferred.contains(expected) &&
                     kotlin.math.abs((preferred.substringAfterLast(" ").trim().toFloatOrNull() ?: 0f) - refresh) < 1f
@@ -349,7 +349,7 @@ class MainActivity : Activity() {
                 if (prefs.getBoolean("saved", false)) {
                     val original = prefs.getString("previous_mode", "__NULL__") ?: "__NULL__"
                     val restoreCommand = if (original == "__NULL__") {
-                        "cmd display clear-user-preferred-display-mode"
+                        "cmd display clear-user-preferred-display-mode 0"
                     } else {
                         "cmd display set-user-preferred-display-mode $original"
                     }
