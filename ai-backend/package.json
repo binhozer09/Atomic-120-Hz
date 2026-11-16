@@ -1,0 +1,8 @@
+{
+  "name": "atomic-120-hz-ai",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  }
+}
