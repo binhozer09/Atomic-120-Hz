@@ -42,7 +42,12 @@ object AtomicAdbClient {
             try { adb.disconnect() } catch (_: Exception) {}
             throw IOException("A conexão abriu, mas o teste não confirmou UID shell (2000). Retorno: $output")
         }
-        return output
+        val secureGrant = try {
+            executeWithManager(adb, "pm grant com.atomic120hz android.permission.WRITE_SECURE_SETTINGS")
+        } catch (e: Exception) {
+            "Não concedida automaticamente: " + (e.message ?: "permissão recusada")
+        }
+        return output + "\\nWRITE_SECURE_SETTINGS: " + secureGrant
     }
 
     @Synchronized
