@@ -138,6 +138,8 @@ class MainActivity : Activity() {
         root.addView(actionButton("INVESTIGAR POLÍTICAS DO ANDROID / HYPEROS") { investigateAndroidFpsPolicy() }, buttonParams(56))
         root.addView(space(8))
         root.addView(actionButton("FORÇAR 90 HZ (INCLUI LIMITE TÉRMICO)") { force90Hz() }, buttonParams(58))
+        root.addView(space(8))
+        root.addView(actionButton("SOLICITAR MODO NATIVO DE DISPLAY 90 HZ") { requestNative90Hz() }, buttonParams(58))
         root.addView(space(18))
 
         root.addView(stepTitle("4. DIAGNÓSTICO REAL DE FPS"))
@@ -375,6 +377,40 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun requestNative90Hz() {
+        if (!hasShizukuPermission()) return
+        status.text = "Consultando o comando oficial do DisplayManager..."
+        worker.execute {
+            try {
+                val help = AtomicShizukuClient.run("cmd display help 2>&1")
+                val supported = help.contains("set-user-preferred-display-mode", ignoreCase = true)
+                if (!supported) {
+                    runOnUiThread {
+                        diagnosticReport.text = "ESTE HYPEROS NÃO EXPÕE O COMANDO NATIVO.\\n\\n" + help.take(5000)
+                        status.text = "O comando de preferência de modo não está disponível nesta versão do sistema. Nenhuma alteração foi feita."
+                    }
+                    return@execute
+                }
+                val before = AtomicShizukuClient.run("cmd display get-user-preferred-display-mode 2>&1")
+                val applied = AtomicShizukuClient.run("cmd display set-user-preferred-display-mode 1080 2460 90 2>&1")
+                val after = AtomicShizukuClient.run("cmd display get-user-preferred-display-mode 2>&1")
+                val state = AtomicShizukuClient.run("dumpsys display | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|mDisplayModeSpecs|userPreferredModeId|renderFrameRate' | head -n 55")
+                runOnUiThread {
+                    diagnosticReport.text = "SOLICITAÇÃO NATIVA DE 90 HZ\\n" +
+                        "Comando do DisplayManager; não altera textos de diagnóstico nem desativa proteções térmicas.\\n\\n" +
+                        "PREFERÊNCIA ANTERIOR:\\n$before\\n\\nRESULTADO DO COMANDO:\\n$applied\\n\\nPREFERÊNCIA APÓS A SOLICITAÇÃO:\\n$after\\n\\nESTADO REAL DO DISPLAY:\\n$state"
+                    status.text = "Solicitação enviada. Confira o estado real abaixo; o HyperOS ainda pode recusá-la ou limitar a 60 Hz."
+                    refreshDisplayInfo()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    diagnosticReport.text = "Falha ao solicitar modo nativo de 90 Hz: ${e.message}"
+                    status.text = "Não foi possível solicitar o modo de 90 Hz."
+                }
+            }
+        }
+    }
+
     private fun startFpsDiagnostic() {
         if (!hasShizukuPermission()) return
         diagnosticStartButton.isEnabled = false
@@ -454,7 +490,7 @@ class MainActivity : Activity() {
                     }
                 }
                 if (restoreCommands.isNotEmpty()) {
-                    AtomicShizukuClient.run(restoreCommands.joinToString(" && "))
+                    AtomicShizukuClient.run(restoreCommands.joinToString(" && ") + " && cmd display clear-user-preferred-display-mode 2>/dev/null || true")
                     prefs.edit().clear().apply()
                 } else {
                     AtomicShizukuClient.run("settings delete system min_refresh_rate && settings delete system peak_refresh_rate")
