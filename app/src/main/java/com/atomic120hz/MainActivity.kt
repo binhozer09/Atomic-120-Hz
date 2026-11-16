@@ -10,6 +10,11 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.Manifest
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Color
 import java.util.concurrent.Executors
@@ -29,12 +34,7 @@ class MainActivity : Activity() {
     private lateinit var disconnectButton: Button
     private val worker = Executors.newSingleThreadExecutor()
 
-    private val refreshSettings = listOf(
-        "system:peak_refresh_rate",
-        "system:min_refresh_rate",
-        "secure:user_refresh_rate",
-        "secure:miui_refresh_rate"
-    )
+    private val refreshSettings = listOf("peak_refresh_rate", "min_refresh_rate")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,6 +42,7 @@ class MainActivity : Activity() {
         window.navigationBarColor = Color.rgb(5, 15, 29)
         buildUi()
         refreshDisplayInfo()
+        ensurePairingNotification()
     }
 
     override fun onDestroy() {
@@ -189,6 +190,22 @@ class MainActivity : Activity() {
         updateButtons()
     }
 
+    private fun ensurePairingNotification() {
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7001)
+        } else {
+            AtomicPairingNotification.show(this, "Abra Depuração sem fio e responda nesta notificação: PORTA CÓDIGO.")
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 7001 && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            AtomicPairingNotification.show(this, "Abra Depuração sem fio e responda nesta notificação: PORTA CÓDIGO.")
+        }
+    }
+
     private fun pairAndConnect() {
         val port = pairingPort.text.toString().trim().toIntOrNull()
         val code = pairingCode.text.toString().trim()
@@ -237,6 +254,11 @@ class MainActivity : Activity() {
             return
         }
         val hz = selectedHz.toInt()
+        if (!Settings.System.canWrite(this)) {
+            status.text = "Autorize o Atomic 120 Hz a modificar configurações do sistema. Depois volte ao app e tente novamente."
+            startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:$packageName")))
+            return
+        }
         val supported = window.decorView.display?.supportedModes?.any {
             kotlin.math.abs(it.refreshRate - selectedHz) < 2f
         } == true
@@ -252,36 +274,32 @@ class MainActivity : Activity() {
                 val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
                 if (!prefs.getBoolean("saved", false)) {
                     val editor = prefs.edit()
-                    refreshSettings.forEach { item ->
-                        val parts = item.split(":")
-                        val oldValue = AtomicAdbClient.execute(this, "settings get " + parts[0] + " " + parts[1])
-                        editor.putString(item, oldValue.trim())
+                    refreshSettings.forEach { key ->
+                        editor.putString(key, Settings.System.getString(contentResolver, key) ?: "__NULL__")
                     }
                     editor.putBoolean("saved", true).apply()
                 }
 
-                val commands = listOf(
-                    "settings put system peak_refresh_rate " + hz + ".0",
-                    "settings put system min_refresh_rate " + hz + ".0",
-                    // Xiaomi/HyperOS builds may also use these Secure-table preferences.
-                    "settings put secure user_refresh_rate 1",
-                    "settings put secure miui_refresh_rate " + hz
-                )
-                commands.forEach { command -> AtomicAdbClient.execute(this, command) }
-
-                val values = refreshSettings.associateWith { item ->
-                    val parts = item.split(":")
-                    AtomicAdbClient.execute(this, "settings get " + parts[0] + " " + parts[1]).trim()
+                val peakOk = Settings.System.putString(contentResolver, "peak_refresh_rate", hz.toString() + ".0")
+                val minOk = Settings.System.putString(contentResolver, "min_refresh_rate", hz.toString() + ".0")
+                if (!peakOk || !minOk) {
+                    throw IllegalStateException("O Android recusou a gravação das preferências de frequência.")
                 }
-                val displayDump = AtomicAdbClient.execute(
-                    this,
-                    "dumpsys display | grep -i -E 'mActiveSfDisplayMode|mActiveRenderFrameRate|peakRefreshRate|mDesiredDisplayModeSpecs' || true"
-                )
+
+                val values = refreshSettings.associateWith { key ->
+                    Settings.System.getString(contentResolver, key) ?: "null"
+                }
+                val displayDump = try {
+                    AtomicAdbClient.execute(
+                        this,
+                        "dumpsys display | grep -i -E 'mActiveSfDisplayMode|mActiveRenderFrameRate|peakRefreshRate|mDesiredDisplayModeSpecs' || true"
+                    )
+                } catch (e: Exception) {
+                    "Diagnóstico ADB indisponível: " + (e.message ?: "sem detalhes")
+                }
                 val valuesWritten =
-                    values["system:peak_refresh_rate"] == hz.toString() + ".0" &&
-                    values["system:min_refresh_rate"] == hz.toString() + ".0" &&
-                    values["secure:user_refresh_rate"] == "1" &&
-                    values["secure:miui_refresh_rate"] == hz.toString()
+                    (values["peak_refresh_rate"]?.toFloatOrNull() ?: 0f) >= hz - 0.5f &&
+                    (values["min_refresh_rate"]?.toFloatOrNull() ?: 0f) >= hz - 0.5f
                 val activeMentionsTarget = displayDump.contains(hz.toString() + ".0")
 
                 runOnUiThread {
@@ -328,15 +346,13 @@ class MainActivity : Activity() {
             try {
                 val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
                 if (prefs.getBoolean("saved", false)) {
-                    refreshSettings.forEach { item ->
-                        val parts = item.split(":")
-                        val original = prefs.getString(item, "null") ?: "null"
-                        val command = if (original == "null") {
-                            "settings delete " + parts[0] + " " + parts[1]
+                    refreshSettings.forEach { key ->
+                        val original = prefs.getString(key, "__NULL__") ?: "__NULL__"
+                        if (original == "__NULL__") {
+                            Settings.System.putString(contentResolver, key, null)
                         } else {
-                            "settings put " + parts[0] + " " + parts[1] + " '" + original + "'"
+                            Settings.System.putString(contentResolver, key, original)
                         }
-                        AtomicAdbClient.execute(this, command)
                     }
                     prefs.edit().clear().apply()
                 }
