@@ -365,7 +365,7 @@ class MainActivity : Activity() {
             report.appendLine("Nota: 'Permission denied' é o isolamento normal do Android para dados privados.")
             report.appendLine()
             report.appendLine("=== TESTE DE ACESSO A ANDROID/DATA (VÁRIOS CAMINHOS) ===")
-            report.appendLine(read("for p in /sdcard/Android/data/com.dts.freefireth /storage/emulated/0/Android/data/com.dts.freefireth /mnt/user/0/primary/Android/data/com.dts.freefireth; do echo \\\"--- $p ---\\\"; ls -la \\\"$p\\\" 2>&1; done"))
+            report.appendLine(read("for p in /sdcard/Android/data/com.dts.freefireth /storage/emulated/0/Android/data/com.dts.freefireth /mnt/user/0/primary/Android/data/com.dts.freefireth; do echo \\\"--- \$p ---\\\"; ls -la \\\"\$p\\\" 2>&1; done"))
             report.appendLine()
             report.appendLine("=== DADOS EXTERNOS DO JOGO ===")
             report.appendLine(read("ls -la /sdcard/Android/data/com.dts.freefireth 2>&1"))
