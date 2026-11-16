@@ -330,9 +330,12 @@ class MainActivity : Activity() {
                         .firstOrNull { it.address.contentEquals(resolvedAddress.address) }
                         ?.hostAddress
                 } catch (_: Exception) { null }
-                // Use the matching address from an active local interface, not a guessed IP.
+                // Shizuku follows this same ADB-over-Wi-Fi behavior: mDNS is used
+                // to discover the dynamic port, but the local adbd endpoint is reached
+                // through loopback. Passing the WLAN address to Kadb can leave the TLS
+                // handshake waiting forever on some HyperOS/Android builds.
                 if (!localHost.isNullOrBlank() && serviceInfo.port in 1..65535) {
-                    endpoint.set(localHost to serviceInfo.port)
+                    endpoint.set("127.0.0.1" to serviceInfo.port)
                 } else {
                     failure.set("mDNS resolveu um endereço que não foi associado às interfaces locais ativas (resolvido=${resolvedAddress?.hostAddress}, porta=${serviceInfo.port}).")
                 }
