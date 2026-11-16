@@ -348,87 +348,118 @@ class MainActivity : Activity() {
      */
     private fun inspectFreeFireApk() {
         inspectApkButton.isEnabled = false
-        status.text = "Abrindo o APK instalado do Free Fire em modo somente leitura..."
+        status.text = "Analisando APK principal, splits e recursos candidatos (somente leitura)..."
         worker.execute {
             try {
                 val appInfo = packageManager.getApplicationInfo("com.dts.freefireth", 0)
-                val apkPath = appInfo.sourceDir
-                val keywords = Regex("(?i)fps|frame.?rate|refresh.?rate|target.?frame|target.?fps|high.?frame|90hz|120hz")
+                val apkPaths = (listOfNotNull(appInfo.sourceDir) + (appInfo.splitSourceDirs?.toList() ?: emptyList())).distinct()
+                val terms = Regex("(?i)fps|frame.?rate|refresh.?rate|target.?frame|target.?fps|high.?frame|frame.?limit|render.?rate")
+                val numeric = Regex("(?i)(?:fps|frame.?rate|refresh.?rate|target.?frame|target.?fps|frame.?limit|render.?rate)[^\\r\\n]{0,48}(?:30|45|60|72|90|120|144|165|180|200)|(?:30|45|60|72|90|120|144|165|180|200)[^\\r\\n]{0,48}(?:fps|frame.?rate|refresh.?rate|target.?frame|target.?fps|frame.?limit|render.?rate)")
                 val report = StringBuilder()
-                report.appendLine("=== ATOMIC 120 HZ — ANÁLISE DO APK ===")
+                report.appendLine("=== ATOMIC 120 HZ — ANÁLISE AVANÇADA DO APK ===")
                 report.appendLine("MODO: SOMENTE LEITURA. Nenhum arquivo será alterado.")
-                report.appendLine("APK principal: $apkPath")
-                report.appendLine("Tamanho: ${java.io.File(apkPath).length()} bytes")
-                var scannedBytes = 0L
-                var scannedEntries = 0
-                val matches = mutableListOf<String>()
-                java.util.zip.ZipFile(apkPath).use { zip ->
-                    val entries = zip.entries()
-                    while (entries.hasMoreElements()) {
-                        val entry = entries.nextElement()
-                        scannedEntries++
-                        if (keywords.containsMatchIn(entry.name)) {
-                            matches.add("ARQUIVO: ${entry.name}")
-                        }
-                        if (!entry.isDirectory && entry.size in 1..(2L * 1024 * 1024) &&
-                            scannedBytes < 24L * 1024 * 1024 &&
-                            (entry.name.endsWith(".json", true) ||
-                             entry.name.endsWith(".xml", true) ||
-                             entry.name.endsWith(".ini", true) ||
-                             entry.name.endsWith(".cfg", true) ||
-                             entry.name.endsWith(".txt", true) ||
-                             entry.name.endsWith(".properties", true) ||
-                             entry.name.endsWith(".dex", true) ||
-                             entry.name.startsWith("assets/"))) {
-                            val remaining = (24L * 1024 * 1024 - scannedBytes).coerceAtLeast(0L)
-                            val limit = minOf(entry.size, remaining, 2L * 1024 * 1024).toInt()
-                            if (limit > 0) {
-                                val bytes = zip.getInputStream(entry).use { input ->
-                                    val out = java.io.ByteArrayOutputStream()
-                                    val buffer = ByteArray(8192)
-                                    var total = 0
-                                    while (total < limit) {
-                                        val n = input.read(buffer, 0, minOf(buffer.size, limit - total))
-                                        if (n <= 0) break
-                                        out.write(buffer, 0, n)
-                                        total += n
-                                    }
-                                    out.toByteArray()
+                report.appendLine("APKs encontrados: \${apkPaths.size} (base + splits instalados)")
+                var totalEntries = 0
+                var totalBytes = 0L
+                var totalCandidates = 0
+                val findings = mutableListOf<String>()
+                val fileCandidates = mutableListOf<String>()
+                val maxTotalBytes = 48L * 1024 * 1024
+                for ((apkIndex, apkPath) in apkPaths.withIndex()) {
+                    val apkFile = java.io.File(apkPath)
+                    report.appendLine()
+                    report.appendLine("APK \${apkIndex + 1}: $apkPath")
+                    report.appendLine("Tamanho: \${apkFile.length()} bytes")
+                    java.util.zip.ZipFile(apkPath).use { zip ->
+                        val entries = zip.entries()
+                        while (entries.hasMoreElements()) {
+                            val entry = entries.nextElement()
+                            totalEntries++
+                            if (entry.isDirectory) continue
+                            val name = entry.name
+                            val lower = name.lowercase()
+                            val configLike = lower.contains("config") || lower.contains("resconf") ||
+                                lower.contains("setting") || lower.contains("quality") ||
+                                lower.contains("frame") || lower.contains("fps") ||
+                                lower.endsWith(".json") || lower.endsWith(".xml") ||
+                                lower.endsWith(".ini") || lower.endsWith(".cfg") ||
+                                lower.endsWith(".conf") || lower.endsWith(".properties")
+                            if (configLike && fileCandidates.size < 100) {
+                                fileCandidates.add("APK \${apkIndex + 1}: $name (\${entry.size} bytes)")
+                            }
+                            val inspectable = configLike || lower.endsWith(".dex")
+                            if (!inspectable || entry.size !in 1..(4L * 1024 * 1024) ||
+                                totalBytes >= maxTotalBytes) continue
+                            val remaining = (maxTotalBytes - totalBytes).coerceAtLeast(0L)
+                            val limit = minOf(entry.size, remaining, 4L * 1024 * 1024).toInt()
+                            if (limit <= 0) continue
+                            val bytes = zip.getInputStream(entry).use { input ->
+                                val out = java.io.ByteArrayOutputStream()
+                                val buffer = ByteArray(8192)
+                                var readTotal = 0
+                                while (readTotal < limit) {
+                                    val n = input.read(buffer, 0, minOf(buffer.size, limit - readTotal))
+                                    if (n <= 0) break
+                                    out.write(buffer, 0, n)
+                                    readTotal += n
                                 }
-                                scannedBytes += bytes.size
-                                val content = String(bytes, Charsets.ISO_8859_1)
-                                val found = keywords.findAll(content).take(8).map { it.value }.distinct().toList()
-                                if (found.isNotEmpty()) {
-                                    matches.add("POSSÍVEL REFERÊNCIA: ${entry.name} — ${found.joinToString(", ")}")
+                                out.toByteArray()
+                            }
+                            totalBytes += bytes.size
+                            val content = String(bytes, Charsets.ISO_8859_1)
+                            val hits = terms.findAll(content).take(24).toList()
+                            if (hits.isNotEmpty()) {
+                                totalCandidates++
+                                val numericHits = numeric.findAll(content).take(8).map { it.value.replace(Regex("[\\x00-\\x1F]+"), " ").trim().take(140) }.distinct().toList()
+                                val contexts = hits.take(6).map { hit ->
+                                    val from = (hit.range.first - 90).coerceAtLeast(0)
+                                    val to = (hit.range.last + 110).coerceAtMost(content.length)
+                                    content.substring(from, to).replace(Regex("[\\x00-\\x1F]+"), " ").replace(Regex("\\s+"), " ").trim().take(240)
+                                }.distinct()
+                                val category = when {
+                                    lower.contains("resconf") -> "RECURSO RESCONF"
+                                    lower.contains("config") || lower.endsWith(".json") || lower.endsWith(".xml") || lower.endsWith(".ini") || lower.endsWith(".cfg") -> "POSSÍVEL CONFIGURAÇÃO"
+                                    lower.endsWith(".dex") -> "CÓDIGO DEX (REFERÊNCIA TEXTUAL)"
+                                    else -> "RECURSO / ASSET"
                                 }
+                                findings.add("[$category] APK \${apkIndex + 1}: $name")
+                                if (numericHits.isNotEmpty()) findings.add("  VALORES PRÓXIMOS A TERMOS DE FPS: \${numericHits.joinToString(" | ")}")
+                                contexts.forEach { findings.add("  CONTEXTO: $it") }
                             }
                         }
                     }
                 }
-                report.appendLine("Entradas ZIP examinadas: $scannedEntries")
-                report.appendLine("Conteúdo examinado: $scannedBytes bytes (limite de segurança: 24 MiB)")
                 report.appendLine()
-                report.appendLine("=== REFERÊNCIAS ENCONTRADAS ===")
-                if (matches.isEmpty()) {
-                    report.appendLine("Nenhuma referência textual clara a FPS foi encontrada nos arquivos examinados.")
-                } else {
-                    matches.take(100).forEach { report.appendLine(it) }
-                }
+                report.appendLine("=== RESUMO DA VARREDURA ===")
+                report.appendLine("Entradas ZIP examinadas: $totalEntries")
+                report.appendLine("Conteúdo examinado: $totalBytes bytes (limite total: 48 MiB)")
+                report.appendLine("Arquivos candidatos de configuração listados: \${fileCandidates.size}")
+                report.appendLine("Arquivos com referências textuais relacionadas: $totalCandidates")
                 report.appendLine()
-                report.appendLine("=== LIMITAÇÕES ===")
-                report.appendLine("O APK pode conter configurações binárias, compactadas, criptografadas ou baixadas após a instalação.")
-                report.appendLine("Uma palavra 'fps' não prova que exista um limite modificável.")
-                report.appendLine("Esta versão não altera o APK, não muda sua assinatura e não toca no anti-cheat.")
+                report.appendLine("=== ARQUIVOS / RECURSOS CANDIDATOS ===")
+                if (fileCandidates.isEmpty()) report.appendLine("Nenhum nome de arquivo candidato encontrado.")
+                else fileCandidates.forEach { report.appendLine(it) }
+                report.appendLine()
+                report.appendLine("=== REFERÊNCIAS COM CONTEXTO ===")
+                if (findings.isEmpty()) report.appendLine("Nenhuma referência textual relacionada a FPS foi localizada nos conteúdos examinados.")
+                else findings.take(160).forEach { report.appendLine(it) }
+                report.appendLine()
+                report.appendLine("=== LIMITES E INTERPRETAÇÃO ===")
+                report.appendLine("A análise inclui base.apk e todos os split APKs informados pelo Android.")
+                report.appendLine("Recursos binários podem conter dados compactados, codificados ou estruturados que uma busca textual não interpreta.")
+                report.appendLine("Números próximos de FPS são apenas pistas; não comprovam que sejam limites ativos ou modificáveis.")
+                report.appendLine("Nenhum arquivo foi extraído para alteração, reempacotado, assinado ou modificado.")
+                report.appendLine("Nenhuma proteção, mecanismo anti-cheat ou dado privado do jogo foi acessado.")
                 runOnUiThread {
                     inspectApkButton.isEnabled = true
-                    diagnosticReport.text = report.toString().take(16000)
-                    status.text = "Análise estrutural concluída. Confira o relatório; nenhum arquivo foi modificado."
+                    diagnosticReport.text = report.toString().take(22000)
+                    status.text = "Análise avançada concluída. Confira o relatório; nenhum arquivo foi modificado."
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     inspectApkButton.isEnabled = true
-                    diagnosticReport.text = "Não foi possível analisar o APK instalado: ${e.message}\n\nO Android pode bloquear o acesso de leitura ao arquivo do pacote."
-                    status.text = "Falha ao abrir o APK do Free Fire."
+                    diagnosticReport.text = "Não foi possível analisar os APKs instalados: \${e.javaClass.simpleName}: \${e.message}\n\nA análise não modificou nenhum arquivo."
+                    status.text = "Falha ao analisar os APKs do Free Fire."
                 }
             }
         }
