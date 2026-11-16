@@ -125,7 +125,7 @@ class MainActivity : Activity() {
         pairingPort = EditText(this).apply {
             hint = "Porta de pareamento"
             inputType = InputType.TYPE_CLASS_NUMBER
-            singleLine = true
+            maxLines = 1
             textSize = 16f
             setTextColor(Color.WHITE)
             setHintTextColor(0xFF7894AD.toInt())
@@ -138,7 +138,7 @@ class MainActivity : Activity() {
         pairingCode = EditText(this).apply {
             hint = "Código de pareamento (6 dígitos)"
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
-            singleLine = true
+            maxLines = 1
             textSize = 16f
             setTextColor(Color.WHITE)
             setHintTextColor(0xFF7894AD.toInt())
