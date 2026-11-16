@@ -290,6 +290,8 @@ class MainActivity : Activity() {
                     }
                     val previous = AtomicAdbClient.execute(this, "cmd display get-user-preferred-display-mode 0").trim()
                     edit.putString("previous_mode", previous.substringAfter(":", "").trim().ifBlank { "__NULL__" })
+                    val previousGameOverlay = AtomicAdbClient.execute(this, "device_config get game_overlay com.dts.freefireth").trim()
+                    edit.putString("previous_game_overlay", if (previousGameOverlay.isBlank() || previousGameOverlay == "null") "__NULL__" else previousGameOverlay)
                     edit.putBoolean("saved", true).apply()
                 }
 
@@ -301,7 +303,9 @@ class MainActivity : Activity() {
                     "settings put secure miui_refresh_rate ${hz.toInt()}",
                     "settings put system peak_refresh_rate ${hz.toFloat()}",
                     "settings put system min_refresh_rate ${hz.toFloat()}",
-                    "cmd display set-user-preferred-display-mode ${matchingMode.physicalWidth} ${matchingMode.physicalHeight} ${matchingMode.refreshRate} 0"
+                    "cmd display set-user-preferred-display-mode ${matchingMode.physicalWidth} ${matchingMode.physicalHeight} ${matchingMode.refreshRate} 0",
+                    "device_config put game_overlay com.dts.freefireth mode=2,fps=90:mode=3,fps=90",
+                    "cmd game mode performance com.dts.freefireth"
                 )
                 val commandResults = applyCommands.map { cmd -> cmd + " => " + AtomicAdbClient.execute(this, cmd) }
                 val secureUser = AtomicAdbClient.execute(this, "settings get secure user_refresh_rate").trim()
@@ -310,7 +314,7 @@ class MainActivity : Activity() {
                 val min = AtomicAdbClient.execute(this, "settings get system min_refresh_rate").trim()
                 val displayDump = AtomicAdbClient.execute(
                     this,
-                    "dumpsys display | grep -i -E 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|PRIORITY_MIUI_REFRESH_RATE'; echo GAME_POLICY; dumpsys game"
+                    "echo FREE_FIRE_GAME_OVERLAY; device_config get game_overlay com.dts.freefireth; echo FREE_FIRE_GAME_CONFIGS; cmd game list-configs com.dts.freefireth; echo FREE_FIRE_GAME_MODES; cmd game list-modes com.dts.freefireth; echo DISPLAY_POLICY; dumpsys display | grep -i -E 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|PRIORITY_MIUI_REFRESH_RATE'; echo GAME_POLICY; dumpsys game"
                 )
                 val readbackOk = secureUser.toFloatOrNull()?.let { kotlin.math.abs(it - hz) < 1f } == true &&
                     secureMiui.toFloatOrNull()?.let { kotlin.math.abs(it - hz) < 1f } == true &&
@@ -381,6 +385,10 @@ class MainActivity : Activity() {
                     val original = prefs.getString("previous_mode", "__NULL__") ?: "__NULL__"
                     val restoreCommand = if (original == "__NULL__") "cmd display clear-user-preferred-display-mode 0" else "cmd display set-user-preferred-display-mode $original"
                     restored.add(restoreCommand + " => " + AtomicAdbClient.execute(this, restoreCommand))
+                    val oldGameOverlay = prefs.getString("previous_game_overlay", "__NULL__") ?: "__NULL__"
+                    val gameOverlayRestore = if (oldGameOverlay == "__NULL__") "device_config delete game_overlay com.dts.freefireth" else "device_config put game_overlay com.dts.freefireth $oldGameOverlay"
+                    restored.add(gameOverlayRestore + " => " + AtomicAdbClient.execute(this, gameOverlayRestore))
+                    restored.add("cmd game mode standard com.dts.freefireth => " + AtomicAdbClient.execute(this, "cmd game mode standard com.dts.freefireth"))
                     val restoreResult = restored.joinToString("\\n")
                     prefs.edit().clear().apply()
                     runOnUiThread {
