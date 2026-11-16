@@ -368,8 +368,7 @@ class MainActivity : Activity() {
                     echo '=== FIM DA BUSCA ==='
                 """.trimIndent()
                 val output = AtomicShizukuClient.run(command).take(18000)
-                val found = output.contains("fps", true) || output.contains("frame", true) ||
-                    output.contains("refresh", true)
+                val found = output.contains("MATCH:")
                 runOnUiThread {
                     diagnosticReport.text = "BUSCA DE ARQUIVOS DE CONFIGURAÇÃO — FREE FIRE\n" +
                         "A busca examinou somente arquivos externos acessíveis, ignorando o cache. Nenhum arquivo foi alterado.\n\n" +
