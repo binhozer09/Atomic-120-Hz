@@ -15,6 +15,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import java.io.IOException
 import java.util.concurrent.Executors
 import rikka.shizuku.Shizuku
 
