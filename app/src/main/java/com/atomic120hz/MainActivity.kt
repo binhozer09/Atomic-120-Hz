@@ -277,14 +277,15 @@ class MainActivity : Activity() {
                     echo '===== 2. FREE FIRE INSTALADO ====='
                     dumpsys package com.dts.freefireth | grep -iE 'versionName|versionCode|targetSdk|enabled=' | head -n 20
                     echo
-                    echo '===== 3. TAXAS CONFIGURADAS (SYSTEM / SECURE / GLOBAL) ====='
-                    for ns in system secure global; do
-                      echo "--- ${'
-                      for key in min_refresh_rate peak_refresh_rate user_refresh_rate user_peak_refresh_rate; do
-                        echo -n "${'
-                        settings get "${'
-                      done
-                    done
+                    echo '===== 3. TAXAS CONFIGURADAS ====='
+                    echo -n 'system.min_refresh_rate='; settings get system min_refresh_rate
+                    echo -n 'system.peak_refresh_rate='; settings get system peak_refresh_rate
+                    echo -n 'system.user_refresh_rate='; settings get system user_refresh_rate
+                    echo -n 'system.user_peak_refresh_rate='; settings get system user_peak_refresh_rate
+                    echo -n 'secure.min_refresh_rate='; settings get secure min_refresh_rate
+                    echo -n 'secure.peak_refresh_rate='; settings get secure peak_refresh_rate
+                    echo -n 'global.min_refresh_rate='; settings get global min_refresh_rate
+                    echo -n 'global.peak_refresh_rate='; settings get global peak_refresh_rate
                     echo
                     echo '===== 4. POLITICA ATIVA DO DISPLAY ====='
                     dumpsys display 2>&1 | grep -iE -C 4 'mDisplayModeSpecs|mDesiredDisplayModeSpecs|mActiveRenderFrameRate|mActiveSfDisplayMode|mDefaultModeId|defaultModeId|userPreferredModeId|renderFrameRate|RefreshRateData|defaultPeakRefreshRate|RefreshRateLimit|Throttling|BlockingZone|baseModeId|primary=' | head -n 240
@@ -292,7 +293,7 @@ class MainActivity : Activity() {
                     echo '===== 5. PERFIL DE JOGO / GAME OVERLAY ====='
                     echo -n 'game_overlay Free Fire='
                     device_config get game_overlay com.dts.freefireth 2>&1
-                    echo '--- game_overlay completo (linhas relacionadas) ---'
+                    echo '--- game_overlay linhas relacionadas ---'
                     device_config list game_overlay 2>&1 | grep -iE 'freefire|dts|fps|mode' | head -n 100
                     echo '--- comandos game disponíveis ---'
                     cmd game help 2>&1 | head -n 80
