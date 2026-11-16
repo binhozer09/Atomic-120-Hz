@@ -330,9 +330,46 @@ class MainActivity : Activity() {
                     echo '===== 12. CAMADAS DO SURFACEFLINGER COM FREE FIRE ====='
                     dumpsys SurfaceFlinger --list 2>&1 | grep -iE 'freefire|dts.freefireth|SurfaceView' | head -n 100
                     echo
+                    echo
+                    echo '===== 13. TODOS OS PROCESSOS RELACIONADOS A JOGO / FPS / DISPLAY ====='
+                    ps -A -o USER,PID,PPID,NAME,ARGS 2>&1 | grep -iE 'game|booster|gaming|freefire|dts|display|refresh|frame|fps|thermal|power|perf|overlay|miui|xiaomi|mediatek|mtk|surface|screen|launcher|securitycenter' | head -n 300
+                    echo
+                    echo '===== 14. PACOTES INSTALADOS RELACIONADOS ====='
+                    pm list packages -f 2>&1 | grep -iE 'game|booster|gaming|freefire|dts|display|refresh|frame|fps|thermal|power|perf|overlay|miui|xiaomi|mediatek|mtk|securitycenter|screen' | head -n 300
+                    echo
+                    echo '===== 15. SERVICOS EM EXECUCAO RELACIONADOS ====='
+                    dumpsys activity services 2>&1 | grep -iE -C 2 'game|booster|gaming|freefire|dts|display|refresh|frame|fps|thermal|power|perf|overlay|miui|xiaomi|mediatek|mtk|securitycenter' | head -n 320
+                    echo
+                    echo '===== 16. RECEIVERS / COMPONENTES DE OVERLAY ====='
+                    cmd overlay list 2>&1 | head -n 180
+                    echo
+                    echo '===== 17. POLITICAS DEVICE CONFIG ====='
+                    for ns in game_overlay game_manager runtime_native_boot display_manager; do
+                      echo "--- namespace: $ns ---"
+                      device_config list "$ns" 2>&1 | head -n 140
+                    done
+                    echo
+                    echo '===== 18. CONFIGURACOES DO SISTEMA RELACIONADAS ====='
+                    settings list system 2>&1 | grep -iE 'refresh|frame|fps|game|boost|perf|power|thermal|display|screen|battery' | head -n 220
+                    settings list secure 2>&1 | grep -iE 'refresh|frame|fps|game|boost|perf|power|thermal|display|screen|battery|accessibility' | head -n 160
+                    settings list global 2>&1 | grep -iE 'refresh|frame|fps|game|boost|perf|power|thermal|display|screen|battery|low_power' | head -n 180
+                    echo
+                    echo '===== 19. APP OPS E ESTADO DE PACOTES CANDIDATOS ====='
+                    for p in com.miui.securitycenter com.miui.gamebooster com.xiaomi.gamecenter com.google.android.play.games com.dts.freefireth com.samsung.android.game.gametools; do
+                      echo "--- $p ---"
+                      pm list packages "$p" 2>&1
+                      dumpsys package "$p" 2>&1 | grep -iE 'enabled=|stopped=|suspended=|versionName|versionCode|User 0:' | head -n 24
+                    done
+                    echo
+                    echo '===== 20. ESTADO DE BATERIA E TEMPERATURA RESUMIDO ====='
+                    dumpsys battery 2>&1 | head -n 100
+                    dumpsys thermalservice 2>&1 | grep -iE 'status|temperature|throttl|severity|sensor' | head -n 140
+                    echo
+                    echo '===== 21. SURFACEFLINGER / LAYERS E TAXA DE QUADROS ====='
+                    dumpsys SurfaceFlinger 2>&1 | grep -iE -C 2 'com.dts.freefireth|freefire|refresh.?rate|frame.?rate|fps|desired.?mode|active.?mode|throttl' | head -n 260
                     echo '===== FIM DO RELATORIO ====='
                 """.trimIndent()
-                val output = AtomicShizukuClient.run(command).take(50000)
+                val output = AtomicShizukuClient.run(command).take(100000)
                 runOnUiThread {
                     diagnosticReport.text = output.ifBlank { "O sistema não retornou dados." }
                     diagnosticCopyButton.isEnabled = true
@@ -379,7 +416,7 @@ class MainActivity : Activity() {
                 try {
                     AtomicShizukuClient.run("dumpsys SurfaceFlinger --timestats -disable")
                 } catch (_: Exception) { }
-                val report = dump.take(14000)
+                val report = dump.take(30000)
                 val gameMentioned = dump.contains("com.dts.freefireth", ignoreCase = true) ||
                     dump.contains("freefire", ignoreCase = true)
                 runOnUiThread {
