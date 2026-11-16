@@ -402,15 +402,26 @@ class MainActivity : Activity() {
                     ?: throw IOException("Não foi possível identificar a resolução do aparelho. Saída: $sizeOutput")
                 val width = sizeMatch.groupValues[1]
                 val height = sizeMatch.groupValues[2]
+                val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
+                val oldGlobalRate = AtomicShizukuClient.run("settings get global user_preferred_refresh_rate 2>&1 || true").trim()
+                if (!prefs.contains("global_user_preferred_refresh_rate")) {
+                    prefs.edit().putString("global_user_preferred_refresh_rate", oldGlobalRate).apply()
+                }
                 val before = AtomicShizukuClient.run("cmd display get-user-preferred-display-mode 2>&1 || true")
-                val applied = AtomicShizukuClient.run("cmd display set-user-preferred-display-mode $width $height 90 2>&1")
+                val nativeAttempt = try {
+                    AtomicShizukuClient.run("cmd display set-user-preferred-display-mode $width $height 90 2>&1")
+                } catch (e: Exception) {
+                    "COMANDO NATIVO RECUSADO: ${e.message}"
+                }
+                val globalWrite = AtomicShizukuClient.run("settings put global user_preferred_refresh_rate 90 && settings get global user_preferred_refresh_rate")
                 val after = AtomicShizukuClient.run("cmd display get-user-preferred-display-mode 2>&1 || true")
                 val state = AtomicShizukuClient.run("dumpsys display | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|mDisplayModeSpecs|userPreferredModeId|renderFrameRate' | head -n 55")
                 runOnUiThread {
-                    diagnosticReport.text = "SOLICITAÇÃO NATIVA DE 90 HZ\\n" +
+                    diagnosticReport.text = "SOLICITAÇÃO DE 90 HZ / DIAGNÓSTICO\\n" +
                         "Resolução física detectada: $width x $height\\n" +
-                        "PREFERÊNCIA ANTERIOR:\\n$before\\n\\nRESULTADO DO COMANDO:\\n$applied\\n\\nPREFERÊNCIA APÓS A SOLICITAÇÃO:\\n$after\\n\\nESTADO REAL DO DISPLAY:\\n$state"
-                    status.text = "Preferência global de 90 Hz enviada. Confira a taxa ativa abaixo; o HyperOS ainda pode limitar a 60 Hz."
+                        "COMANDO NATIVO:\\n$nativeAttempt\\n\\nPREFERÊNCIA GLOBAL GRAVADA (user_preferred_refresh_rate):\\n$globalWrite\\n" +
+                        "PREFERÊNCIA NATIVA APÓS A TENTATIVA:\\n$after\\n\\nESTADO REAL DO DISPLAY:\\n$state"
+                    status.text = if (globalWrite.trim().endsWith("90")) "Preferência global de 90 Hz gravada. Confira a taxa ativa; isso não garante que o HyperOS a aplique." else "O HyperOS não confirmou a preferência global de 90 Hz."
                     refreshDisplayInfo()
                 }
             } catch (e: Exception) {
@@ -499,6 +510,10 @@ class MainActivity : Activity() {
                         val old = prefs.getString(key, "null") ?: "null"
                         if (old == "null") "settings delete system $key" else "settings put system $key $old"
                     }
+                }.toMutableList()
+                if (prefs.contains("global_user_preferred_refresh_rate")) {
+                    val oldGlobal = prefs.getString("global_user_preferred_refresh_rate", "null") ?: "null"
+                    restoreCommands.add(if (oldGlobal == "null") "settings delete global user_preferred_refresh_rate" else "settings put global user_preferred_refresh_rate $oldGlobal")
                 }
                 if (restoreCommands.isNotEmpty()) {
                     AtomicShizukuClient.run(restoreCommands.joinToString(" && ") + " && cmd display clear-user-preferred-display-mode 2>/dev/null || true")
