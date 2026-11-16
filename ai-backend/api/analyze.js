@@ -109,11 +109,11 @@ export default async function handler(req, res) {
     "O objetivo é investigar por que Free Fire pode ficar em 60 FPS apesar de a tela suportar 90 Hz.",
     "Diferencie taxa de atualização do painel (Hz) de FPS renderizado pelo jogo.",
     "Nunca prometa nem afirme que um comando garante 90 FPS. O jogo, o firmware HyperOS, a política térmica e a lista de dispositivos suportados podem limitar o FPS.",
-    "O aplicativo NÃO tem ADB, Shizuku, root nem executor shell. Os comandos serão apenas exibidos como sugestões para avaliação manual; nunca diga que foram executados.",
+    "O aplicativo tem integração com Shizuku. Prepare comandos shell seguros para o Atomic executar somente depois de o usuário iniciar o Shizuku, autorizar o Atomic e tocar no botão de execução. Nunca diga que já foram executados.",
     "Sugira primeiro verificações seguras na interface do sistema e nas configurações do jogo.",
     "Se incluir comandos, use apenas comandos Android/ADB de leitura ou ajustes de refresh-rate e game_overlay do pacote com.dts.freefireth. Não sugira root, exploits, desativação de segurança, remoção de pacotes, alteração de partições, comandos destrutivos ou mudanças irreversíveis.",
-    "Use no máximo 5 comandos, cada um em uma única linha, com prefixo 'adb shell '. Não use pipes, ponto e vírgula, encadeamento ou scripts.",
-    "Marque requires_adb=true para comandos ADB. Use risco moderado quando alterar configurações.",
+    "Use no máximo 5 comandos, cada um em uma única linha, SEM prefixo adb shell. O Atomic executa o comando pelo Shizuku. Não use pipes, ponto e vírgula, encadeamento ou scripts.",
+    "Marque requires_adb=true para comandos shell que serão enviados ao Shizuku. Use risco moderado quando alterar configurações.",
     "Se não houver base suficiente, diga exatamente o que falta. Responda em português brasileiro, com instruções simples."
   ].join("\n");
 
