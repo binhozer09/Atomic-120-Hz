@@ -379,7 +379,8 @@ class MainActivity : Activity() {
                     }
                     val original = prefs.getString("previous_mode", "__NULL__") ?: "__NULL__"
                     val restoreCommand = if (original == "__NULL__") "cmd display clear-user-preferred-display-mode 0" else "cmd display set-user-preferred-display-mode $original"
-                    restored.add(AtomicAdbClient.execute(this, restoreCommand))
+                    restored.add(restoreCommand + " => " + AtomicAdbClient.execute(this, restoreCommand))
+                    val restoreResult = restored.joinToString("\\n")
                     prefs.edit().clear().apply()
                     runOnUiThread {
                         enabled = false
