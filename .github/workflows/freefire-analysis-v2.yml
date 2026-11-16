@@ -1,0 +1,101 @@
+name: Free Fire official APK analysis v2
+
+on:
+  push:
+    branches: [shizuku-integrado]
+    paths:
+      - '.github/workflows/freefire-analysis-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-official-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Discover official Garena download endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re, urllib.parse, urllib.request
+          page = "https://ffodownload.freefiremobile.com/?lang=en"
+          def get(url):
+              req = urllib.request.Request(url, headers={"User-Agent":"Mozilla/5.0"})
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  return r.geturl(), r.read().decode("utf-8","replace")
+          final, html = get(page)
+          print("Official page:", final)
+          print("HTML bytes:", len(html))
+          urls = set()
+          for value in re.findall(r'''(?:href|src)\s*=\s*["']([^"']+)["']''', html, re.I):
+              urls.add(urllib.parse.urljoin(final, value.replace("&amp;","&")))
+          # Inspect JavaScript served by Garena's own domains; download buttons may be generated there.
+          allowed = ("freefiremobile.com", "garena.com", "garenanow.com")
+          scripts = [u for u in urls if urllib.parse.urlparse(u).path.lower().endswith(".js")
+                     and any((urllib.parse.urlparse(u).hostname or "").endswith(d) for d in allowed)]
+          print("Official script assets:", len(scripts))
+          for script in scripts[:30]:
+              try:
+                  _, js = get(script)
+              except Exception as e:
+                  print("Script fetch skipped:", script, str(e)[:120])
+                  continue
+              for raw in re.findall(r'''https?://[^"'\\s<>]+''', js, re.I):
+                  urls.add(raw.rstrip(");,"))
+              for raw in re.findall(r'''["']([^"']*(?:\.apk|download)[^"']*)["']''', js, re.I):
+                  urls.add(urllib.parse.urljoin(script, raw))
+          candidates = []
+          for u in sorted(urls):
+              p = urllib.parse.urlparse(u)
+              host = p.hostname or ""
+              if any(host == d or host.endswith("." + d) for d in allowed):
+                  if ".apk" in u.lower() or "download" in u.lower():
+                      candidates.append(u)
+          print("Official download candidates:")
+          for u in candidates:
+              print(u)
+          with open("candidates.txt","w") as f:
+              f.write("\n".join(candidates))
+          if not candidates:
+              raise SystemExit("Garena page/scripts did not expose a direct APK URL. No third-party mirror will be used.")
+          PY
+      - name: Download official APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r url; do
+            [ -n "$url" ] || continue
+            host="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.urlparse(sys.argv[1]).hostname or "")' "$url")"
+            case "$host" in *.freefiremobile.com|freefiremobile.com|*.garena.com|garena.com|*.garenanow.com|garenanow.com) ;; *) continue ;; esac
+            if curl -fL --retry 2 --silent --show-error "$url" -o freefire.apk; then
+              if file freefire.apk | grep -qi 'Zip archive'; then
+                echo "APK archive downloaded from official Garena-controlled host: $host"
+                exit 0
+              fi
+            fi
+          done < candidates.txt
+          echo "No valid APK archive downloaded."
+          exit 1
+      - name: Inspect package metadata and FPS-related resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y aapt apktool unzip
+          mkdir -p report decoded
+          aapt dump badging freefire.apk | tee report/package.txt
+          apktool d -f -s freefire.apk -o decoded >/dev/null
+          (grep -RniE '(^|[^0-9])(60|90|120)[[:space:]_-]*(fps|hz)|fps[^[:alnum:]]*(60|90|120)|frame.?rate|refresh.?rate' decoded 2>/dev/null || true) > report/frame-rate-hits.txt
+          unzip -l freefire.apk > report/archive-list.txt
+          sha256sum freefire.apk > report/sha256.txt
+          echo "Report lines:"
+          wc -l report/package.txt report/frame-rate-hits.txt report/archive-list.txt
+      - name: Upload report only
+        uses: actions/upload-artifact@v4
+        with:
+          name: freefire-official-apk-analysis
+          path: report/
+          if-no-files-found: error
