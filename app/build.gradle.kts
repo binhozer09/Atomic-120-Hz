@@ -30,6 +30,6 @@ android {
 
 dependencies {
     // Kadb 2.1.5 alinha o protocolo ADB com o AOSP atual.
-    implementation("com.flyfishxu:kadb:2.1.5")
+    implementation("com.flyfishxu:kadb:2.1.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }
