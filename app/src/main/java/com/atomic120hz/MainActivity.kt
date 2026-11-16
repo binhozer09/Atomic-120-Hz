@@ -276,7 +276,7 @@ class MainActivity : Activity() {
             try {
                 val prefs = getSharedPreferences("atomic_display_mode_backup", MODE_PRIVATE)
                 if (!prefs.getBoolean("saved", false)) {
-                    val previous = AtomicAdbClient.execute(this, "cmd display get-user-preferred-display-mode")
+                    val previous = AtomicAdbClient.execute(this, "cmd display get-user-preferred-display-mode 0")
                     val previousMode = previous.substringAfter(":", "").trim()
                     prefs.edit()
                         .putString("previous_mode", if (previousMode.isBlank() || previousMode.equals("null", true)) "__NULL__" else previousMode)
@@ -287,7 +287,7 @@ class MainActivity : Activity() {
                 val width = matchingMode.physicalWidth
                 val height = matchingMode.physicalHeight
                 val refresh = matchingMode.refreshRate
-                val command = "cmd display set-user-preferred-display-mode $width $height $refresh"
+                val command = "cmd display set-user-preferred-display-mode $width $height $refresh 0"
                 val commandResult = AtomicAdbClient.execute(this, command)
                 val preferred = AtomicAdbClient.execute(this, "cmd display get-user-preferred-display-mode")
                 val expected = "$width $height"
@@ -296,7 +296,7 @@ class MainActivity : Activity() {
                 val displayDump = try {
                     AtomicAdbClient.execute(
                         this,
-                        "dumpsys display | grep -i -E 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs' || true"
+                        "dumpsys display | grep -i -E 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|supportedRefreshRates|PRIORITY_MIUI_REFRESH_RATE' ; echo SECURE_SETTINGS; settings get secure user_refresh_rate; settings get secure miui_refresh_rate; echo POWERKEEPER; dumpsys activity services com.miui.powerkeeper | grep -i -E 'refresh|frame|rate|game' | head -40; echo GAME_POLICY; dumpsys game | head -100"
                     )
                 } catch (e: Exception) {
                     "Diagnóstico da tela indisponível: " + (e.message ?: "sem detalhes")
