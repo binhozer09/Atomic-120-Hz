@@ -53,6 +53,8 @@ object AtomicAdbClient {
         return executeWithManager(adb, command)
     }
 
+    fun isConnected(context: Context): Boolean = manager(context).isConnected
+
     @Synchronized
     fun disconnect(context: Context) {
         try { manager(context).disconnect() } catch (_: Exception) {}
