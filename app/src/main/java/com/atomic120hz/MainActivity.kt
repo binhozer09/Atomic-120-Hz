@@ -12,7 +12,6 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.Manifest
 import android.content.Intent
-import android.net.Uri
 import android.provider.Settings
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
@@ -34,7 +33,6 @@ class MainActivity : Activity() {
     private lateinit var disconnectButton: Button
     private val worker = Executors.newSingleThreadExecutor()
 
-    private val refreshSettings = listOf("peak_refresh_rate", "min_refresh_rate")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -263,75 +261,68 @@ class MainActivity : Activity() {
             status.text = "Atomic Access ainda não está conectado. Faça o pareamento ADB primeiro."
             return
         }
-        val hz = selectedHz.toInt()
-        if (!Settings.System.canWrite(this)) {
-            status.text = "Autorize o Atomic 120 Hz a modificar configurações do sistema. Depois volte ao app e tente novamente."
-            startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:$packageName")))
-            return
-        }
-        val supported = window.decorView.display?.supportedModes?.any {
-            kotlin.math.abs(it.refreshRate - selectedHz) < 2f
-        } == true
-        if (!supported) {
-            status.text = "Este aparelho não informou um modo de " + hz + " Hz compatível."
+        val hz = selectedHz
+        val matchingMode = window.decorView.display?.supportedModes
+            ?.filter { kotlin.math.abs(it.refreshRate - hz) < 1f }
+            ?.maxByOrNull { it.physicalWidth.toLong() * it.physicalHeight.toLong() }
+        if (matchingMode == null) {
+            status.text = "Este aparelho não informou um modo de " + hz.toInt() + " Hz compatível."
             return
         }
 
         toggle.isEnabled = false
-        status.text = "Lendo valores originais e aplicando " + hz + " Hz..."
+        status.text = "Salvando o modo anterior e solicitando " + hz.toInt() + " Hz ao serviço de tela..."
         worker.execute {
             try {
-                val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
+                val prefs = getSharedPreferences("atomic_display_mode_backup", MODE_PRIVATE)
                 if (!prefs.getBoolean("saved", false)) {
-                    val editor = prefs.edit()
-                    refreshSettings.forEach { key ->
-                        editor.putString(key, Settings.System.getString(contentResolver, key) ?: "__NULL__")
-                    }
-                    editor.putBoolean("saved", true).apply()
+                    val previous = AtomicAdbClient.execute(this, "cmd display get-user-preferred-display-mode")
+                    val previousMode = previous.substringAfter(":", "").trim()
+                    prefs.edit()
+                        .putString("previous_mode", if (previousMode.isBlank() || previousMode.equals("null", true)) "__NULL__" else previousMode)
+                        .putBoolean("saved", true)
+                        .apply()
                 }
 
-                val peakOk = Settings.System.putString(contentResolver, "peak_refresh_rate", hz.toString() + ".0")
-                val minOk = Settings.System.putString(contentResolver, "min_refresh_rate", hz.toString() + ".0")
-                if (!peakOk || !minOk) {
-                    throw IllegalStateException("O Android recusou a gravação das preferências de frequência.")
-                }
-
-                val values = refreshSettings.associateWith { key ->
-                    Settings.System.getString(contentResolver, key) ?: "null"
-                }
+                val width = matchingMode.physicalWidth
+                val height = matchingMode.physicalHeight
+                val refresh = matchingMode.refreshRate
+                val command = "cmd display set-user-preferred-display-mode $width $height $refresh"
+                val commandResult = AtomicAdbClient.execute(this, command)
+                val preferred = AtomicAdbClient.execute(this, "cmd display get-user-preferred-display-mode")
+                val expected = "$width $height"
+                val readbackOk = preferred.contains(expected) &&
+                    kotlin.math.abs(preferred.substringAfterLast(" ").trim().toFloatOrNull() ?: 0f - refresh) < 1f
                 val displayDump = try {
                     AtomicAdbClient.execute(
                         this,
-                        "dumpsys display | grep -i -E 'mActiveSfDisplayMode|mActiveRenderFrameRate|peakRefreshRate|mDesiredDisplayModeSpecs' || true"
+                        "dumpsys display | grep -i -E 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs' || true"
                     )
                 } catch (e: Exception) {
-                    "Diagnóstico ADB indisponível: " + (e.message ?: "sem detalhes")
+                    "Diagnóstico da tela indisponível: " + (e.message ?: "sem detalhes")
                 }
-                val valuesWritten =
-                    (values["peak_refresh_rate"]?.toFloatOrNull() ?: 0f) >= hz - 0.5f &&
-                    (values["min_refresh_rate"]?.toFloatOrNull() ?: 0f) >= hz - 0.5f
-                val activeMentionsTarget = displayDump.contains(hz.toString() + ".0")
 
                 runOnUiThread {
                     toggle.isEnabled = true
-                    if (valuesWritten) {
+                    if (readbackOk) {
                         enabled = true
-                        toggle.text = "RESTAURAR CONFIGURAÇÕES"
+                        toggle.text = "RESTAURAR MODO ANTERIOR"
                         toggle.backgroundTintList = ColorStateList.valueOf(0xFF087A58.toInt())
-                        status.text = "PREFERÊNCIAS GRAVADAS E CONFERIDAS (" + hz + " Hz)." +
-                            (if (activeMentionsTarget) " O relatório da tela também menciona " + hz + " Hz."
-                             else " A taxa ativa ainda não foi confirmada; confira o indicador de Hz do Android.") +
-                            "\n\nValores lidos:\n" +
-                            values.entries.joinToString("\n") { entry -> entry.key + " = " + entry.value } +
-                            "\n\nEstado da tela:\n" + displayDump
+                        status.text = "PREFERÊNCIA DE TELA ACEITA PELO ANDROID: " + hz.toInt() + " Hz." +
+                            "\\nA leitura confirma o modo preferido, mas não garante que o jogo manterá essa frequência." +
+                            "\\n\\nComando: " + command +
+                            "\\nRetorno: " + commandResult +
+                            "\\nLeitura: " + preferred +
+                            "\\n\\nDiagnóstico da tela:\\n" + displayDump
                     } else {
                         enabled = false
-                        toggle.text = "TENTAR APLICAR " + hz + " Hz"
+                        toggle.text = "TENTAR APLICAR " + hz.toInt() + " Hz"
                         toggle.backgroundTintList = ColorStateList.valueOf(0xFF174568.toInt())
-                        status.text = "O Android não confirmou todos os valores. Não vou marcar como ativado." +
-                            "\n\nValores lidos:\n" +
-                            values.entries.joinToString("\n") { entry -> entry.key + " = " + entry.value } +
-                            "\n\nEstado da tela:\n" + displayDump
+                        status.text = "O Android não confirmou o modo preferido solicitado." +
+                            "\\nComando: " + command +
+                            "\\nRetorno: " + commandResult +
+                            "\\nLeitura: " + preferred +
+                            "\\n\\nDiagnóstico da tela:\\n" + displayDump
                     }
                     refreshDisplayInfo()
                 }
@@ -339,8 +330,8 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     toggle.isEnabled = true
                     enabled = false
-                    toggle.text = "TENTAR APLICAR " + hz + " Hz"
-                    status.text = "FALHA AO EXECUTAR COMANDOS ADB: " + (e.message ?: "erro desconhecido")
+                    toggle.text = "TENTAR APLICAR " + hz.toInt() + " Hz"
+                    status.text = "FALHA AO APLICAR MODO DE TELA: " + (e.message ?: "erro desconhecido")
                 }
             }
         }
@@ -348,36 +339,42 @@ class MainActivity : Activity() {
 
     private fun disableMode() {
         if (!adbConnected) {
-            status.text = "Reconecte o ADB para restaurar as configurações anteriores."
+            status.text = "Reconecte o ADB para restaurar o modo de tela anterior."
             return
         }
         toggle.isEnabled = false
         worker.execute {
             try {
-                val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
+                val prefs = getSharedPreferences("atomic_display_mode_backup", MODE_PRIVATE)
                 if (prefs.getBoolean("saved", false)) {
-                    refreshSettings.forEach { key ->
-                        val original = prefs.getString(key, "__NULL__") ?: "__NULL__"
-                        if (original == "__NULL__") {
-                            Settings.System.putString(contentResolver, key, null)
-                        } else {
-                            Settings.System.putString(contentResolver, key, original)
-                        }
+                    val original = prefs.getString("previous_mode", "__NULL__") ?: "__NULL__"
+                    val restoreCommand = if (original == "__NULL__") {
+                        "cmd display clear-user-preferred-display-mode"
+                    } else {
+                        "cmd display set-user-preferred-display-mode $original"
                     }
+                    val restoreResult = AtomicAdbClient.execute(this, restoreCommand)
                     prefs.edit().clear().apply()
-                }
-                runOnUiThread {
-                    enabled = false
-                    toggle.isEnabled = true
-                    toggle.text = "APLICAR " + selectedHz.toInt() + " Hz"
-                    toggle.backgroundTintList = ColorStateList.valueOf(0xFF174568.toInt())
-                    status.text = "Configurações anteriores restauradas."
-                    refreshDisplayInfo()
+                    runOnUiThread {
+                        enabled = false
+                        toggle.isEnabled = true
+                        toggle.text = "APLICAR " + selectedHz.toInt() + " Hz"
+                        toggle.backgroundTintList = ColorStateList.valueOf(0xFF174568.toInt())
+                        status.text = "Modo de tela anterior restaurado.\\n" + restoreResult
+                        refreshDisplayInfo()
+                    }
+                } else {
+                    runOnUiThread {
+                        enabled = false
+                        toggle.isEnabled = true
+                        toggle.text = "APLICAR " + selectedHz.toInt() + " Hz"
+                        status.text = "Não há modo anterior salvo para restaurar."
+                    }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     toggle.isEnabled = true
-                    status.text = "Falha ao restaurar as configurações: " + (e.message ?: "erro desconhecido")
+                    status.text = "FALHA AO RESTAURAR MODO DE TELA: " + (e.message ?: "erro desconhecido")
                 }
             }
         }
