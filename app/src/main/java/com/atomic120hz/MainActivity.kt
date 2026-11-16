@@ -144,7 +144,7 @@ class MainActivity : Activity() {
         root.addView(space(8))
         root.addView(actionButton("INVESTIGAR POLÍTICAS DO ANDROID / HYPEROS") { investigateAndroidFpsPolicy() }, buttonParams(56))
         root.addView(space(8))
-        root.addView(actionButton("FORÇAR 90 HZ (INCLUI LIMITE TÉRMICO)") { force90Hz() }, buttonParams(58))
+        root.addView(actionButton("SOLICITAR 90 HZ (PRESERVA LIMITE TÉRMICO)") { force90Hz() }, buttonParams(58))
         root.addView(space(8))
         root.addView(actionButton("SOLICITAR MODO NATIVO DE DISPLAY 90 HZ") { requestNative90Hz() }, buttonParams(58))
         root.addView(space(18))
@@ -251,7 +251,7 @@ class MainActivity : Activity() {
         status.text = "Salvando preferências e solicitando $selectedHz Hz nas camadas compatíveis..."
         worker.execute {
             try {
-                val systemKeys = listOf("min_refresh_rate", "peak_refresh_rate", "user_refresh_rate", "user_peak_refresh_rate", "miui_refresh_rate", "thermal_limit_refresh_rate")
+                val systemKeys = listOf("min_refresh_rate", "peak_refresh_rate", "user_refresh_rate", "user_peak_refresh_rate", "miui_refresh_rate")
                 val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
                 systemKeys.forEach { key ->
                     val old = AtomicShizukuClient.run("settings get system $key 2>&1 || true").trim()
@@ -347,6 +347,9 @@ class MainActivity : Activity() {
             report.appendLine("=== ATOMIC 120 HZ — EXPLORADOR FREE FIRE ===")
             report.appendLine("Modo: SOMENTE LEITURA. Nenhum arquivo foi criado, apagado ou modificado.")
             report.appendLine()
+            report.appendLine("=== IDENTIDADE E NÍVEL DE ACESSO DO SHIZUKU ===")
+            report.appendLine(read("id; echo \\\"SELINUX:\\\"; getenforce 2>&1; echo \\\"MONTAGENS:\\\"; mount | grep -E \\\"/storage|/data/user|/mnt/user\\\" | head -n 50"))
+            report.appendLine()
             report.appendLine("=== PACOTE INSTALADO ===")
             report.appendLine(read("dumpsys package com.dts.freefireth | grep -iE 'versionName|versionCode|codePath|dataDir|credentialProtectedDataDir|deviceProtectedDataDir|userId|targetSdk' | head -n 60"))
             report.appendLine()
@@ -356,6 +359,9 @@ class MainActivity : Activity() {
             report.appendLine("=== PASTA PRIVADA DO APLICATIVO ===")
             report.appendLine(read("ls -ld /data/user/0/com.dts.freefireth /data/data/com.dts.freefireth /data/user_de/0/com.dts.freefireth 2>&1"))
             report.appendLine("Nota: 'Permission denied' é o isolamento normal do Android para dados privados.")
+            report.appendLine()
+            report.appendLine("=== TESTE DE ACESSO A ANDROID/DATA (VÁRIOS CAMINHOS) ===")
+            report.appendLine(read("for p in /sdcard/Android/data/com.dts.freefireth /storage/emulated/0/Android/data/com.dts.freefireth /mnt/user/0/primary/Android/data/com.dts.freefireth; do echo \\\"--- $p ---\\\"; ls -la \\\"$p\\\" 2>&1; done"))
             report.appendLine()
             report.appendLine("=== DADOS EXTERNOS DO JOGO ===")
             report.appendLine(read("ls -la /sdcard/Android/data/com.dts.freefireth 2>&1"))
