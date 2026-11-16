@@ -315,6 +315,7 @@ class MainActivity : Activity() {
                     secureMiui.toFloatOrNull()?.let { kotlin.math.abs(it - hz) < 1f } == true &&
                     peak.toFloatOrNull()?.let { kotlin.math.abs(it - hz) < 1f } == true &&
                     min.toFloatOrNull()?.let { kotlin.math.abs(it - hz) < 1f } == true
+                val command = applyCommands.joinToString("; ")
                 val commandResult = commandResults.joinToString("\\n")
                 val preferred = "secure user_refresh_rate=$secureUser; secure miui_refresh_rate=$secureMiui; system peak_refresh_rate=$peak; system min_refresh_rate=$min"
 
