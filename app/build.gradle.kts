@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "com.atomic120hz"
-    compileSdk = 37
+    compileSdk = 36
     defaultConfig {
         applicationId = "com.atomic120hz"
         minSdk = 24
@@ -13,6 +13,7 @@ android {
         versionCode = 3
         versionName = "1.2.0"
     }
+    kotlinOptions { jvmTarget = "17" }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -27,12 +28,6 @@ android {
     }
 }
 
-
-kotlin {
-    compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-    }
-}
 
 dependencies {
     // Kadb 2.1.5 alinha o protocolo ADB com o AOSP atual.
