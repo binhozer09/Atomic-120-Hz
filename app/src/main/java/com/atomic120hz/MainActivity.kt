@@ -574,7 +574,829 @@ class MainActivity : Activity() {
             report.append(layers)
 
             val display = read("5. DISPLAY ATIVO / TAXAS / LIMITADORES",
-                "dumpsys display 2>&1 | grep -iE -A 3 -B 3 'mActiveSfDisplayMode|mActiveRenderFrameRate|mActiveModeId|defaultModeId|defaultPeakRefreshRate|mDesiredDisplayModeSpecs|mDisplayModeSpecs|mRefreshRateLimitations|mRefreshRateThrottling|renderFrameRate|supportedModes' | head -n 220; echo '--- SETTINGS ---'; for k in min_refresh_rate peak_refresh_rate user_refresh_rate user_peak_refresh_rate miui_refresh_rate; do echo \"$k=$(settings get system $k 2>&1)\"; done")
+                "dumpsys display 2>&1 | grep -iE -A 3 -B 3 'mActiveSfDisplayMode|mActiveRenderFrameRate|mActiveModeId|defaultModeId|defaultPeakRefreshRate|mDesiredDisplayModeSpecs|mDisplayModeSpecs|mRefreshRateLimitations|mRefreshRateThrottling|renderFrameRate|supportedModes' | head -n 220; echo '--- SETTINGS ---'; for k in min_refresh_rate peak_refresh_rate user_refresh_rate user_peak_refresh_rate miui_refresh_rate; do echo \"${'")
+            report.append(display)
+
+            val thermal = read("6. ESTADO TÉRMICO / ECONOMIA DE ENERGIA (SOMENTE LEITURA)",
+                "dumpsys thermalservice 2>&1 | head -n 120; dumpsys power 2>&1 | grep -iE 'low.?power|power.?save|thermal|mode|interactive' | head -n 100")
+            report.append(thermal)
+
+            val apk = read("7. INSPEÇÃO SEGURA DO APK",
+                "pm path com.dts.freefireth 2>&1; ls -l $(pm path com.dts.freefireth 2>/dev/null | sed -n '1s/^package://p') 2>&1")
+            report.append(apk)
+            report.append("\n=== ANÁLISE AUTOMÁTICA DOS RESULTADOS ===\n")
+            val profile90 = Regex("(?i)(fps|frame.?rate)[^\n]{0,35}90|90[^\n]{0,35}(fps|frame.?rate)").containsMatchIn(overlay)
+            val display60 = Regex("(?i)(renderFrameRate|mActiveSfDisplayMode|defaultPeakRefreshRate)[^\n]{0,45}60(?:\\.0)?").containsMatchIn(display)
+            val thermalWarning = Regex("(?i)(SEVERE|CRITICAL|EMERGENCY|SHUTDOWN)").containsMatchIn(thermal)
+            report.appendLine(if (pkg.contains("package:", true) || pkg.contains("versionName", true)) "• Pacote: Free Fire localizado." else "• Pacote: não foi possível confirmar a instalação.")
+            report.appendLine(if (process.contains(Regex("\\b[1-9][0-9]*\\b"))) "• Processo: há indício de processo ativo; confirme que o jogo estava aberto durante a coleta." else "• Processo: não foi detectado com segurança nesta coleta.")
+            report.appendLine(if (profile90) "• Perfil Android: há referência a 90 FPS no perfil; isso não prova renderização real a 90 FPS." else "• Perfil Android: não foi localizada referência explícita a 90 FPS.")
+            report.appendLine(if (display60) "• Display: há referência a 60 Hz no estado reportado; isso pode limitar a apresentação, mas não identifica sozinho o limitador do jogo." else "• Display: esta coleta não confirmou um estado ativo de 60 Hz.")
+            report.appendLine(if (thermalWarning) "• Temperatura: o serviço reportou estado térmico elevado; a proteção térmica será preservada." else "• Temperatura: não foi identificado estado crítico explícito nesta saída.")
+            report.appendLine("• FPS real: este diagnóstico não inventa uma medição. Para medir quadros por segundo, use INICIAR MEDIÇÃO, jogue por 30 segundos e FINALIZAR.")
+            report.appendLine("• APK: metadados e caminho são verificados sem modificar, reempacotar ou contornar a proteção do jogo.")
+            report.appendLine("\n=== AÇÃO AUTOMÁTICA ===")
+            report.appendLine("Nenhuma configuração foi alterada: os dados atuais ainda não identificam uma chave de sistema segura que esteja limitando o Free Fire. Proteção térmica, SELinux e anti-cheat permanecem intactos.")
+
+            runOnUiThread {
+                diagnosticReport.text = report.toString().take(22000)
+                status.text = "Diagnóstico completo concluído. Copie o relatório para identificar a próxima correção."
+                refreshDisplayInfo()
+            }
+        }
+    }
+
+    private fun diagnoseFreeFireLimit() {
+        if (!hasShizukuPermission()) return
+        status.text = "Verificando configurações do sistema e perfil do Free Fire..."
+        worker.execute {
+            try {
+                val command = """
+                    echo '=== PACOTE FREE FIRE ==='
+                    dumpsys package com.dts.freefireth | grep -iE 'versionName|versionCode|targetSdk' || true
+                    echo '=== TAXAS CONFIGURADAS ==='
+                    echo -n 'min_refresh_rate='; settings get system min_refresh_rate
+                    echo -n 'peak_refresh_rate='; settings get system peak_refresh_rate
+                    echo -n 'user_refresh_rate='; settings get system user_refresh_rate
+                    echo -n 'user_peak_refresh_rate='; settings get system user_peak_refresh_rate
+                    echo '=== PERFIL GAME OVERLAY ==='
+                    device_config get game_overlay com.dts.freefireth 2>&1 || true
+                    echo '=== JOGOS RECONHECIDOS PELO ANDROID ==='
+                    cmd game list 2>&1 || true
+                    echo '=== ESTADO DO DISPLAY ==='
+                    dumpsys display | grep -iE 'mActiveDisplayMode|mActiveSfDisplayMode|defaultModeId|defaultPeakRefreshRate|renderFrameRate|refreshRate' | head -n 45 || true
+                    echo '=== SERVICO DE JOGOS ==='
+                    dumpsys game 2>&1 | grep -i -A 5 -B 3 'com.dts.freefireth' | head -n 60 || true
+                """.trimIndent()
+                val output = AtomicShizukuClient.run(command).take(10000)
+                runOnUiThread {
+                    diagnosticReport.text = "VERIFICAÇÃO DO LIMITE DO FREE FIRE\n" +
+                        "Coleta somente leitura; nenhum arquivo ou configuração do jogo foi alterado.\n\n" +
+                        output.ifBlank { "O sistema não retornou dados para esses itens." }
+                    status.text = "Verificação concluída. Copie o relatório e envie aqui."
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    diagnosticReport.text = "Falha na verificação: " + e.message
+                    status.text = "Não foi possível concluir o diagnóstico."
+                }
+            }
+        }
+    }
+
+    private fun investigateAndroidFpsPolicy() {
+        if (!hasShizukuPermission()) return
+        status.text = "Investigando políticas de FPS do Android e HyperOS (somente leitura)..."
+        worker.execute {
+            try {
+                val command = """
+                    echo '===== ATOMIC 120 HZ - POLITICAS ANDROID/HYPEROS ====='
+                    echo '===== 1. PACOTE E PROCESSO DO FREE FIRE ====='
+                    dumpsys package com.dts.freefireth | grep -iE 'versionName|versionCode|userId|targetSdk|enabled=' | head -n 35 || true
+                    echo '===== 2. POLITICA GAME MANAGER ====='
+                    dumpsys game_manager 2>&1 | grep -i -A 12 -B 5 -E 'com.dts.freefireth|game.?mode|intervention|fps|frame.?rate|downscale' | head -n 180 || true
+                    echo '===== 3. SERVICO GAME ====='
+                    dumpsys game 2>&1 | grep -i -A 12 -B 5 -E 'com.dts.freefireth|game.?mode|intervention|fps|frame.?rate|downscale' | head -n 180 || true
+                    echo '===== 4. COMANDOS GAME DISPONIVEIS ====='
+                    cmd game help 2>&1 | head -n 100 || true
+                    echo '===== 5. DEVICE CONFIG GAME OVERLAY ====='
+                    device_config get game_overlay com.dts.freefireth 2>&1 || true
+                    device_config list game_overlay 2>&1 | grep -i -A 3 -B 3 'com.dts.freefireth' | head -n 80 || true
+                    echo '===== 6. CONFIGURACOES GLOBAIS DE JOGOS E FPS ====='
+                    settings list global | grep -iE 'game|fps|frame|refresh|refresh_rate|power' | head -n 140 || true
+                    echo '===== 7. CONFIGURACOES SYSTEM DE DISPLAY ====='
+                    settings list system | grep -iE 'game|fps|frame|refresh|refresh_rate|miui|thermal' | head -n 140 || true
+                    echo '===== 8. CAMADAS DO FREE FIRE ====='
+                    dumpsys SurfaceFlinger --list 2>&1 | grep -iE 'freefire|FFMainActivity|SurfaceView' | head -n 100 || true
+                    echo '===== 9. TAXA ATIVA E LIMITADORES DO DISPLAY ====='
+                    dumpsys display 2>&1 | grep -iE -A 3 -B 3 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|mDisplayModeSpecs|mRefreshRateLimitations|mRefreshRateThrottling|thermal|low.?power|renderFrameRate|userPreferredModeId|supportedModes' | head -n 220 || true
+                    echo '===== 10. PROPRIEDADES DO FABRICANTE RELACIONADAS A JOGOS ====='
+                    getprop 2>/dev/null | grep -iE 'game|fps|frame.?rate|refresh|thermal|performance|power.?mode' | head -n 180 || true
+                    echo '===== 11. PACOTES DE OTIMIZACAO PRESENTES (SEM ALTERAR) ====='
+                    pm list packages | grep -iE 'game|securitycenter|performance|powerkeeper|thermal' | head -n 120 || true
+                    echo '===== 12. ESTADO TERMICO E ENERGIA ====='
+                    dumpsys thermalservice 2>&1 | head -n 100 || true
+                    dumpsys power 2>&1 | grep -iE 'low.?power|power.?save|thermal|mode|interactive' | head -n 100 || true
+                    echo '===== FIM - COLETA SOMENTE LEITURA ====='
+                """.trimIndent()
+                val output = AtomicShizukuClient.run(command).take(22000)
+                runOnUiThread {
+                    diagnosticReport.text = "INVESTIGAÇÃO DAS POLÍTICAS ANDROID/HYPEROS\n" +
+                        "Coleta somente leitura. Nenhum serviço, pacote ou configuração foi desativado ou alterado.\n\n" +
+                        output.ifBlank { "O sistema não retornou dados para esses itens." }
+                    status.text = "Investigação concluída. Copie o relatório completo e envie aqui."
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    diagnosticReport.text = "Falha na investigação: " + e.message
+                    status.text = "Não foi possível concluir a investigação."
+                }
+            }
+        }
+    }
+
+    private fun force90Hz() {
+        if (!hasShizukuPermission()) return
+        status.text = "Salvando valores atuais e solicitando 90 Hz em todas as preferências compatíveis..."
+        worker.execute {
+            try {
+                val systemKeys = listOf("min_refresh_rate", "peak_refresh_rate", "user_refresh_rate", "user_peak_refresh_rate", "miui_refresh_rate")
+                val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
+                systemKeys.forEach { key ->
+                    val old = AtomicShizukuClient.run("settings get system $key 2>&1 || true").trim()
+                    if (!prefs.contains(key)) prefs.edit().putString(key, old).apply()
+                }
+                val oldGlobal = AtomicShizukuClient.run("settings get global user_preferred_refresh_rate 2>&1 || true").trim()
+                if (!prefs.contains("global_user_preferred_refresh_rate")) prefs.edit().putString("global_user_preferred_refresh_rate", oldGlobal).apply()
+                val writes = systemKeys.joinToString(" ; ") { "settings put system $it 90 2>&1" } +
+                    " ; settings put global user_preferred_refresh_rate 90 2>&1"
+                val verify = systemKeys.joinToString(" ; ") { "echo $it=\$(settings get system $it)" } +
+                    " ; echo global_user_preferred_refresh_rate=\$(settings get global user_preferred_refresh_rate)"
+                val result = AtomicShizukuClient.run(
+                    "$writes ; echo '--- PREFERÊNCIAS GRAVADAS ---' ; $verify" +
+                    " ; echo '--- ESTADO REAL DO DISPLAY ---' ; dumpsys display | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|mActiveModeId|mDesiredDisplayModeSpecs|mDisplayModeSpecs|renderFrameRate|mRefreshRateThrottling' | head -n 55" +
+                    " ; echo '--- PERFIL DE FPS DO FREE FIRE (LEITURA) ---' ; dumpsys game 2>&1 | grep -i -A 8 -B 3 'com.dts.freefireth' | head -n 45"
+                )
+                runOnUiThread {
+                    status.text = "Preferências compatíveis de 90 Hz gravadas. Limites de jogo, hardware e temperatura continuam sob controle do sistema."
+                    diagnosticReport.text = "ATOMIC 120 HZ — APLICAÇÃO AMPLIADA DE 90 HZ\n" +
+                        "Valores anteriores salvos para restauração. Nenhum limite térmico foi alterado; políticas internas do jogo/HyperOS não são sobrescritas.\n\n" + result
+                    refreshDisplayInfo()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { status.text = "Falha ao solicitar 90 Hz: ${e.message}" }
+            }
+        }
+    }
+
+    private fun requestNative90Hz() {
+        if (!hasShizukuPermission()) return
+        status.text = "Verificando a resolução física e aplicando as preferências de 90 Hz..."
+        worker.execute {
+            try {
+                // Apenas lê a resolução física; nunca altera wm size.
+                val sizeOutput = AtomicShizukuClient.run("wm size 2>&1 || true")
+                val physicalMatch = Regex("(?im)^Physical size:\\s*(\\d+)x(\\d+)").find(sizeOutput)
+                    ?: Regex("(?m)^(\\d+)x(\\d+)$").find(sizeOutput)
+                    ?: throw IOException("Não foi possível ler a resolução física. Saída: $sizeOutput")
+                val width = physicalMatch.groupValues[1]
+                val height = physicalMatch.groupValues[2]
+                val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
+                val systemKeys = listOf(
+                    "min_refresh_rate", "peak_refresh_rate", "user_refresh_rate",
+                    "user_peak_refresh_rate", "miui_refresh_rate"
+                )
+                systemKeys.forEach { key ->
+                    if (!prefs.contains(key)) {
+                        val old = AtomicShizukuClient.run("settings get system $key 2>&1 || true").trim()
+                        prefs.edit().putString(key, old).apply()
+                    }
+                }
+                if (!prefs.contains("global_user_preferred_refresh_rate")) {
+                    val old = AtomicShizukuClient.run("settings get global user_preferred_refresh_rate 2>&1 || true").trim()
+                    prefs.edit().putString("global_user_preferred_refresh_rate", old).apply()
+                }
+
+                val before = AtomicShizukuClient.run("cmd display get-user-preferred-display-mode 2>&1 || true")
+                val nativeAttempt = try {
+                    AtomicShizukuClient.run("cmd display set-user-preferred-display-mode $width $height 90 2>&1")
+                } catch (e: Exception) {
+                    "O HyperOS recusou o comando nativo: ${e.message}"
+                }
+
+                // Fallback: preferências de taxa já identificadas no Redmi/HyperOS.
+                // Não altera resolução, não desativa serviços e não remove proteção térmica.
+                val writes = systemKeys.joinToString(" ; ") {
+                    "settings put system $it 90 2>&1 || true"
+                } + " ; settings put global user_preferred_refresh_rate 90 2>&1 || true"
+                val verify = systemKeys.joinToString(" ; ") {
+                    "echo $it=\$(settings get system $it 2>&1)"
+                } + " ; echo global_user_preferred_refresh_rate=\$(settings get global user_preferred_refresh_rate 2>&1)"
+                val fallbackResult = AtomicShizukuClient.run(
+                    "$writes ; echo '--- CONFERENCIA DAS PREFERENCIAS ---' ; $verify"
+                )
+                val after = AtomicShizukuClient.run("cmd display get-user-preferred-display-mode 2>&1 || true")
+                val state = AtomicShizukuClient.run(
+                    "dumpsys display 2>&1 | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|mActiveModeId|mDesiredDisplayModeSpecs|mDisplayModeSpecs|mRefreshRateThrottling|renderFrameRate|supportedModes' | head -n 100"
+                )
+                runOnUiThread {
+                    diagnosticReport.text = "RESOLUÇÃO NATIVA + SOLICITAÇÃO DE 90 HZ\n" +
+                        "Resolução física lida: $width x $height (nenhuma alteração de resolução foi executada).\n\n" +
+                        "TENTATIVA DO DISPLAYMANAGER:\n$nativeAttempt\n\n" +
+                        "PREFERÊNCIA NATIVA ANTES:\n$before\n\n" +
+                        "PREFERÊNCIA NATIVA DEPOIS:\n$after\n\n" +
+                        "$fallbackResult\n\nESTADO REAL DO DISPLAY:\n$state"
+                    status.text = "Preferências de 90 Hz reaplicadas. Confira no relatório se o HyperOS ativou 90 Hz; a resolução foi preservada."
+                    refreshDisplayInfo()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    diagnosticReport.text = "Falha ao solicitar 90 Hz: ${e.message}"
+                    status.text = "Não foi possível concluir a solicitação."
+                }
+            }
+        }
+    }
+
+    private fun startFpsDiagnostic() {
+        if (!hasShizukuPermission()) return
+        diagnosticStartButton.isEnabled = false
+        diagnosticReport.text = "Iniciando captura do SurfaceFlinger..."
+        worker.execute {
+            try {
+                val output = AtomicShizukuClient.run("dumpsys SurfaceFlinger --timestats -clear && dumpsys SurfaceFlinger --timestats -enable")
+                runOnUiThread {
+                    diagnosticStartButton.isEnabled = true
+                    diagnosticReport.text = "MEDIÇÃO INICIADA. Agora volte ao Free Fire, jogue por aproximadamente 30 segundos e retorne ao Atomic. Depois toque em FINALIZAR.\\n\\n$output"
+                    status.text = "Captura ativa. Jogue por 30 segundos e volte para finalizar."
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    diagnosticStartButton.isEnabled = true
+                    diagnosticReport.text = "Não foi possível iniciar a captura: ${e.message}\\nSeu Android pode não oferecer essa opção do SurfaceFlinger."
+                }
+            }
+        }
+    }
+
+    private fun finishFpsDiagnostic() {
+        if (!hasShizukuPermission()) return
+        diagnosticStopButton.isEnabled = false
+        diagnosticReport.text = "Lendo os quadros capturados..."
+        worker.execute {
+            try {
+                val dump = AtomicShizukuClient.run("dumpsys SurfaceFlinger --timestats -dump")
+                try {
+                    AtomicShizukuClient.run("dumpsys SurfaceFlinger --timestats -disable")
+                } catch (_: Exception) { }
+                val report = dump.take(14000)
+                val gameMentioned = dump.contains("com.dts.freefireth", ignoreCase = true) ||
+                    dump.contains("freefire", ignoreCase = true)
+                runOnUiThread {
+                    diagnosticStopButton.isEnabled = true
+                    diagnosticReport.text = (if (gameMentioned) {
+                        "O relatório menciona o Free Fire. Confira as camadas e contagens abaixo.\\n\\n"
+                    } else {
+                        "O nome do Free Fire não apareceu claramente no relatório. Isso não prova ausência de captura; confira as camadas listadas.\\n\\n"
+                    }) + report
+                    status.text = "Diagnóstico finalizado. Envie uma captura deste relatório para análise."
+                }
+            } catch (e: Exception) {
+                try { AtomicShizukuClient.run("dumpsys SurfaceFlinger --timestats -disable") } catch (_: Exception) { }
+                runOnUiThread {
+                    diagnosticStopButton.isEnabled = true
+                    diagnosticReport.text = "Falha ao ler o relatório: ${e.message}"
+                }
+            }
+        }
+    }
+
+    private fun copyDiagnosticLog() {
+        val report = diagnosticReport.text?.toString().orEmpty()
+        if (report.isBlank() || report == "O relatório aparecerá aqui.") {
+            status.text = "Gere o relatório primeiro para copiar o log."
+            return
+        }
+        val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Atomic 120 Hz - Log FPS", report))
+        status.text = "Log copiado! Agora é só colar aqui na conversa."
+    }
+
+    private fun restoreSettings() {
+        if (!hasShizukuPermission()) return
+        toggle.isEnabled = false
+        worker.execute {
+            try {
+                val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
+                val keys = listOf("min_refresh_rate", "peak_refresh_rate", "user_refresh_rate", "miui_refresh_rate", "thermal_limit_refresh_rate")
+                val restoreCommands = keys.mapNotNull { key ->
+                    if (!prefs.contains(key)) null
+                    else {
+                        val old = prefs.getString(key, "null") ?: "null"
+                        if (old == "null") "settings delete system $key" else "settings put system $key $old"
+                    }
+                }.toMutableList()
+                if (prefs.contains("global_user_preferred_refresh_rate")) {
+                    val oldGlobal = prefs.getString("global_user_preferred_refresh_rate", "null") ?: "null"
+                    restoreCommands.add(if (oldGlobal == "null") "settings delete global user_preferred_refresh_rate" else "settings put global user_preferred_refresh_rate $oldGlobal")
+                }
+                if (restoreCommands.isNotEmpty()) {
+                    AtomicShizukuClient.run(restoreCommands.joinToString(" && ") + " && cmd display clear-user-preferred-display-mode 2>/dev/null || true")
+                    prefs.edit().clear().apply()
+                } else {
+                    AtomicShizukuClient.run("settings delete system min_refresh_rate && settings delete system peak_refresh_rate")
+                }
+                runOnUiThread {
+                    enabled = false
+                    toggle.isEnabled = true
+                    status.text = "Preferências removidas. O sistema voltou a controlar a frequência."
+                    refreshDisplayInfo()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    toggle.isEnabled = true
+                    status.text = "Falha ao restaurar: ${e.message}"
+                }
+            }
+        }
+    }
+
+    private fun hasShizukuPermission(): Boolean {
+        val alive = try { Shizuku.pingBinder() } catch (_: Exception) { false }
+        val granted = alive && try { Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED } catch (_: Exception) { false }
+        shizukuReady = granted
+        updateConnectionUi()
+        if (!granted) {
+            status.text = if (alive) {
+                "Solicitando autorização do Shizuku. Aceite a janela de permissão e toque novamente na função."
+            } else {
+                "Inicie o serviço Shizuku por Depuração sem fio antes de continuar."
+            }
+            if (alive) {
+                try { Shizuku.requestPermission(SHIZUKU_PERMISSION_CODE) } catch (_: Exception) { }
+            }
+        }
+        return granted
+    }
+
+    private fun openShizukuDownload() {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$SHIZUKU_PACKAGE")))
+        } catch (_: Exception) {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/download/")))
+        }
+    }
+
+    private fun choose(hz: Int) {
+        selectedHz = hz
+        executeButton.text = "EXECUTAR COMANDOS PARA $hz FPS"
+        updateButtons()
+        status.text = "Selecionado: $hz Hz. Conecte o Shizuku para aplicar."
+    }
+
+    private fun refreshDisplayInfo() {
+        val display = window.decorView.display
+        val modes = display?.supportedModes?.map { it.refreshRate.toInt().toString() }?.distinct()
+        val current = display?.refreshRate
+        detected.text = "FREQUÊNCIA REPORTADA\n" +
+            (current?.let { "${it.toInt()} Hz" } ?: "Indisponível") +
+            "\n\nModos informados: " + (modes?.joinToString(" / ")?.plus(" Hz") ?: "não disponíveis")
+    }
+
+    private fun updateConnectionUi() {
+        if (!::connectButton.isInitialized || !::executeButton.isInitialized) return
+        connectButton.text = if (shizukuReady) "SHIZUKU CONECTADO E AUTORIZADO" else "CONECTAR AO SHIZUKU / AUTORIZAR"
+        executeButton.isEnabled = shizukuReady
+        executeButton.alpha = if (shizukuReady) 1f else .55f
+    }
+
+    private fun updateButtons() {
+        if (!::hz90.isInitialized) return
+        hz90.alpha = if (selectedHz == 90) 1f else .55f
+        hz120.alpha = if (selectedHz == 120) 1f else .55f
+    }
+
+    private fun stepTitle(value: String) = TextView(this).apply {
+        text = value
+        textSize = 17f
+        gravity = Gravity.CENTER
+        setTextColor(0xFF55C9FF.toInt())
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+    }
+
+    private fun actionButton(label: String, action: () -> Unit) = Button(this).apply {
+        text = label
+        isAllCaps = false
+        setTextColor(Color.WHITE)
+        backgroundTintList = ColorStateList.valueOf(0xFF174568.toInt())
+        setOnClickListener { action() }
+    }
+
+    private fun buttonParams(height: Int) = LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.MATCH_PARENT, dp(height)
+    )
+
+    private fun space(height: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(height)) }
+    private fun match() = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+
+    companion object {
+        private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
+        private const val SHIZUKU_PERMISSION_CODE = 120
+    }
+}
+}k=$(settings get system ${'")
+            report.append(display)
+
+            val thermal = read("6. ESTADO TÉRMICO / ECONOMIA DE ENERGIA (SOMENTE LEITURA)",
+                "dumpsys thermalservice 2>&1 | head -n 120; dumpsys power 2>&1 | grep -iE 'low.?power|power.?save|thermal|mode|interactive' | head -n 100")
+            report.append(thermal)
+
+            val apk = read("7. INSPEÇÃO SEGURA DO APK",
+                "pm path com.dts.freefireth 2>&1; ls -l $(pm path com.dts.freefireth 2>/dev/null | sed -n '1s/^package://p') 2>&1")
+            report.append(apk)
+            report.append("\n=== ANÁLISE AUTOMÁTICA DOS RESULTADOS ===\n")
+            val profile90 = Regex("(?i)(fps|frame.?rate)[^\n]{0,35}90|90[^\n]{0,35}(fps|frame.?rate)").containsMatchIn(overlay)
+            val display60 = Regex("(?i)(renderFrameRate|mActiveSfDisplayMode|defaultPeakRefreshRate)[^\n]{0,45}60(?:\\.0)?").containsMatchIn(display)
+            val thermalWarning = Regex("(?i)(SEVERE|CRITICAL|EMERGENCY|SHUTDOWN)").containsMatchIn(thermal)
+            report.appendLine(if (pkg.contains("package:", true) || pkg.contains("versionName", true)) "• Pacote: Free Fire localizado." else "• Pacote: não foi possível confirmar a instalação.")
+            report.appendLine(if (process.contains(Regex("\\b[1-9][0-9]*\\b"))) "• Processo: há indício de processo ativo; confirme que o jogo estava aberto durante a coleta." else "• Processo: não foi detectado com segurança nesta coleta.")
+            report.appendLine(if (profile90) "• Perfil Android: há referência a 90 FPS no perfil; isso não prova renderização real a 90 FPS." else "• Perfil Android: não foi localizada referência explícita a 90 FPS.")
+            report.appendLine(if (display60) "• Display: há referência a 60 Hz no estado reportado; isso pode limitar a apresentação, mas não identifica sozinho o limitador do jogo." else "• Display: esta coleta não confirmou um estado ativo de 60 Hz.")
+            report.appendLine(if (thermalWarning) "• Temperatura: o serviço reportou estado térmico elevado; a proteção térmica será preservada." else "• Temperatura: não foi identificado estado crítico explícito nesta saída.")
+            report.appendLine("• FPS real: este diagnóstico não inventa uma medição. Para medir quadros por segundo, use INICIAR MEDIÇÃO, jogue por 30 segundos e FINALIZAR.")
+            report.appendLine("• APK: metadados e caminho são verificados sem modificar, reempacotar ou contornar a proteção do jogo.")
+            report.appendLine("\n=== AÇÃO AUTOMÁTICA ===")
+            report.appendLine("Nenhuma configuração foi alterada: os dados atuais ainda não identificam uma chave de sistema segura que esteja limitando o Free Fire. Proteção térmica, SELinux e anti-cheat permanecem intactos.")
+
+            runOnUiThread {
+                diagnosticReport.text = report.toString().take(22000)
+                status.text = "Diagnóstico completo concluído. Copie o relatório para identificar a próxima correção."
+                refreshDisplayInfo()
+            }
+        }
+    }
+
+    private fun diagnoseFreeFireLimit() {
+        if (!hasShizukuPermission()) return
+        status.text = "Verificando configurações do sistema e perfil do Free Fire..."
+        worker.execute {
+            try {
+                val command = """
+                    echo '=== PACOTE FREE FIRE ==='
+                    dumpsys package com.dts.freefireth | grep -iE 'versionName|versionCode|targetSdk' || true
+                    echo '=== TAXAS CONFIGURADAS ==='
+                    echo -n 'min_refresh_rate='; settings get system min_refresh_rate
+                    echo -n 'peak_refresh_rate='; settings get system peak_refresh_rate
+                    echo -n 'user_refresh_rate='; settings get system user_refresh_rate
+                    echo -n 'user_peak_refresh_rate='; settings get system user_peak_refresh_rate
+                    echo '=== PERFIL GAME OVERLAY ==='
+                    device_config get game_overlay com.dts.freefireth 2>&1 || true
+                    echo '=== JOGOS RECONHECIDOS PELO ANDROID ==='
+                    cmd game list 2>&1 || true
+                    echo '=== ESTADO DO DISPLAY ==='
+                    dumpsys display | grep -iE 'mActiveDisplayMode|mActiveSfDisplayMode|defaultModeId|defaultPeakRefreshRate|renderFrameRate|refreshRate' | head -n 45 || true
+                    echo '=== SERVICO DE JOGOS ==='
+                    dumpsys game 2>&1 | grep -i -A 5 -B 3 'com.dts.freefireth' | head -n 60 || true
+                """.trimIndent()
+                val output = AtomicShizukuClient.run(command).take(10000)
+                runOnUiThread {
+                    diagnosticReport.text = "VERIFICAÇÃO DO LIMITE DO FREE FIRE\n" +
+                        "Coleta somente leitura; nenhum arquivo ou configuração do jogo foi alterado.\n\n" +
+                        output.ifBlank { "O sistema não retornou dados para esses itens." }
+                    status.text = "Verificação concluída. Copie o relatório e envie aqui."
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    diagnosticReport.text = "Falha na verificação: " + e.message
+                    status.text = "Não foi possível concluir o diagnóstico."
+                }
+            }
+        }
+    }
+
+    private fun investigateAndroidFpsPolicy() {
+        if (!hasShizukuPermission()) return
+        status.text = "Investigando políticas de FPS do Android e HyperOS (somente leitura)..."
+        worker.execute {
+            try {
+                val command = """
+                    echo '===== ATOMIC 120 HZ - POLITICAS ANDROID/HYPEROS ====='
+                    echo '===== 1. PACOTE E PROCESSO DO FREE FIRE ====='
+                    dumpsys package com.dts.freefireth | grep -iE 'versionName|versionCode|userId|targetSdk|enabled=' | head -n 35 || true
+                    echo '===== 2. POLITICA GAME MANAGER ====='
+                    dumpsys game_manager 2>&1 | grep -i -A 12 -B 5 -E 'com.dts.freefireth|game.?mode|intervention|fps|frame.?rate|downscale' | head -n 180 || true
+                    echo '===== 3. SERVICO GAME ====='
+                    dumpsys game 2>&1 | grep -i -A 12 -B 5 -E 'com.dts.freefireth|game.?mode|intervention|fps|frame.?rate|downscale' | head -n 180 || true
+                    echo '===== 4. COMANDOS GAME DISPONIVEIS ====='
+                    cmd game help 2>&1 | head -n 100 || true
+                    echo '===== 5. DEVICE CONFIG GAME OVERLAY ====='
+                    device_config get game_overlay com.dts.freefireth 2>&1 || true
+                    device_config list game_overlay 2>&1 | grep -i -A 3 -B 3 'com.dts.freefireth' | head -n 80 || true
+                    echo '===== 6. CONFIGURACOES GLOBAIS DE JOGOS E FPS ====='
+                    settings list global | grep -iE 'game|fps|frame|refresh|refresh_rate|power' | head -n 140 || true
+                    echo '===== 7. CONFIGURACOES SYSTEM DE DISPLAY ====='
+                    settings list system | grep -iE 'game|fps|frame|refresh|refresh_rate|miui|thermal' | head -n 140 || true
+                    echo '===== 8. CAMADAS DO FREE FIRE ====='
+                    dumpsys SurfaceFlinger --list 2>&1 | grep -iE 'freefire|FFMainActivity|SurfaceView' | head -n 100 || true
+                    echo '===== 9. TAXA ATIVA E LIMITADORES DO DISPLAY ====='
+                    dumpsys display 2>&1 | grep -iE -A 3 -B 3 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|mDisplayModeSpecs|mRefreshRateLimitations|mRefreshRateThrottling|thermal|low.?power|renderFrameRate|userPreferredModeId|supportedModes' | head -n 220 || true
+                    echo '===== 10. PROPRIEDADES DO FABRICANTE RELACIONADAS A JOGOS ====='
+                    getprop 2>/dev/null | grep -iE 'game|fps|frame.?rate|refresh|thermal|performance|power.?mode' | head -n 180 || true
+                    echo '===== 11. PACOTES DE OTIMIZACAO PRESENTES (SEM ALTERAR) ====='
+                    pm list packages | grep -iE 'game|securitycenter|performance|powerkeeper|thermal' | head -n 120 || true
+                    echo '===== 12. ESTADO TERMICO E ENERGIA ====='
+                    dumpsys thermalservice 2>&1 | head -n 100 || true
+                    dumpsys power 2>&1 | grep -iE 'low.?power|power.?save|thermal|mode|interactive' | head -n 100 || true
+                    echo '===== FIM - COLETA SOMENTE LEITURA ====='
+                """.trimIndent()
+                val output = AtomicShizukuClient.run(command).take(22000)
+                runOnUiThread {
+                    diagnosticReport.text = "INVESTIGAÇÃO DAS POLÍTICAS ANDROID/HYPEROS\n" +
+                        "Coleta somente leitura. Nenhum serviço, pacote ou configuração foi desativado ou alterado.\n\n" +
+                        output.ifBlank { "O sistema não retornou dados para esses itens." }
+                    status.text = "Investigação concluída. Copie o relatório completo e envie aqui."
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    diagnosticReport.text = "Falha na investigação: " + e.message
+                    status.text = "Não foi possível concluir a investigação."
+                }
+            }
+        }
+    }
+
+    private fun force90Hz() {
+        if (!hasShizukuPermission()) return
+        status.text = "Salvando valores atuais e solicitando 90 Hz em todas as preferências compatíveis..."
+        worker.execute {
+            try {
+                val systemKeys = listOf("min_refresh_rate", "peak_refresh_rate", "user_refresh_rate", "user_peak_refresh_rate", "miui_refresh_rate")
+                val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
+                systemKeys.forEach { key ->
+                    val old = AtomicShizukuClient.run("settings get system $key 2>&1 || true").trim()
+                    if (!prefs.contains(key)) prefs.edit().putString(key, old).apply()
+                }
+                val oldGlobal = AtomicShizukuClient.run("settings get global user_preferred_refresh_rate 2>&1 || true").trim()
+                if (!prefs.contains("global_user_preferred_refresh_rate")) prefs.edit().putString("global_user_preferred_refresh_rate", oldGlobal).apply()
+                val writes = systemKeys.joinToString(" ; ") { "settings put system $it 90 2>&1" } +
+                    " ; settings put global user_preferred_refresh_rate 90 2>&1"
+                val verify = systemKeys.joinToString(" ; ") { "echo $it=\$(settings get system $it)" } +
+                    " ; echo global_user_preferred_refresh_rate=\$(settings get global user_preferred_refresh_rate)"
+                val result = AtomicShizukuClient.run(
+                    "$writes ; echo '--- PREFERÊNCIAS GRAVADAS ---' ; $verify" +
+                    " ; echo '--- ESTADO REAL DO DISPLAY ---' ; dumpsys display | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|mActiveModeId|mDesiredDisplayModeSpecs|mDisplayModeSpecs|renderFrameRate|mRefreshRateThrottling' | head -n 55" +
+                    " ; echo '--- PERFIL DE FPS DO FREE FIRE (LEITURA) ---' ; dumpsys game 2>&1 | grep -i -A 8 -B 3 'com.dts.freefireth' | head -n 45"
+                )
+                runOnUiThread {
+                    status.text = "Preferências compatíveis de 90 Hz gravadas. Limites de jogo, hardware e temperatura continuam sob controle do sistema."
+                    diagnosticReport.text = "ATOMIC 120 HZ — APLICAÇÃO AMPLIADA DE 90 HZ\n" +
+                        "Valores anteriores salvos para restauração. Nenhum limite térmico foi alterado; políticas internas do jogo/HyperOS não são sobrescritas.\n\n" + result
+                    refreshDisplayInfo()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { status.text = "Falha ao solicitar 90 Hz: ${e.message}" }
+            }
+        }
+    }
+
+    private fun requestNative90Hz() {
+        if (!hasShizukuPermission()) return
+        status.text = "Verificando a resolução física e aplicando as preferências de 90 Hz..."
+        worker.execute {
+            try {
+                // Apenas lê a resolução física; nunca altera wm size.
+                val sizeOutput = AtomicShizukuClient.run("wm size 2>&1 || true")
+                val physicalMatch = Regex("(?im)^Physical size:\\s*(\\d+)x(\\d+)").find(sizeOutput)
+                    ?: Regex("(?m)^(\\d+)x(\\d+)$").find(sizeOutput)
+                    ?: throw IOException("Não foi possível ler a resolução física. Saída: $sizeOutput")
+                val width = physicalMatch.groupValues[1]
+                val height = physicalMatch.groupValues[2]
+                val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
+                val systemKeys = listOf(
+                    "min_refresh_rate", "peak_refresh_rate", "user_refresh_rate",
+                    "user_peak_refresh_rate", "miui_refresh_rate"
+                )
+                systemKeys.forEach { key ->
+                    if (!prefs.contains(key)) {
+                        val old = AtomicShizukuClient.run("settings get system $key 2>&1 || true").trim()
+                        prefs.edit().putString(key, old).apply()
+                    }
+                }
+                if (!prefs.contains("global_user_preferred_refresh_rate")) {
+                    val old = AtomicShizukuClient.run("settings get global user_preferred_refresh_rate 2>&1 || true").trim()
+                    prefs.edit().putString("global_user_preferred_refresh_rate", old).apply()
+                }
+
+                val before = AtomicShizukuClient.run("cmd display get-user-preferred-display-mode 2>&1 || true")
+                val nativeAttempt = try {
+                    AtomicShizukuClient.run("cmd display set-user-preferred-display-mode $width $height 90 2>&1")
+                } catch (e: Exception) {
+                    "O HyperOS recusou o comando nativo: ${e.message}"
+                }
+
+                // Fallback: preferências de taxa já identificadas no Redmi/HyperOS.
+                // Não altera resolução, não desativa serviços e não remove proteção térmica.
+                val writes = systemKeys.joinToString(" ; ") {
+                    "settings put system $it 90 2>&1 || true"
+                } + " ; settings put global user_preferred_refresh_rate 90 2>&1 || true"
+                val verify = systemKeys.joinToString(" ; ") {
+                    "echo $it=\$(settings get system $it 2>&1)"
+                } + " ; echo global_user_preferred_refresh_rate=\$(settings get global user_preferred_refresh_rate 2>&1)"
+                val fallbackResult = AtomicShizukuClient.run(
+                    "$writes ; echo '--- CONFERENCIA DAS PREFERENCIAS ---' ; $verify"
+                )
+                val after = AtomicShizukuClient.run("cmd display get-user-preferred-display-mode 2>&1 || true")
+                val state = AtomicShizukuClient.run(
+                    "dumpsys display 2>&1 | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|mActiveModeId|mDesiredDisplayModeSpecs|mDisplayModeSpecs|mRefreshRateThrottling|renderFrameRate|supportedModes' | head -n 100"
+                )
+                runOnUiThread {
+                    diagnosticReport.text = "RESOLUÇÃO NATIVA + SOLICITAÇÃO DE 90 HZ\n" +
+                        "Resolução física lida: $width x $height (nenhuma alteração de resolução foi executada).\n\n" +
+                        "TENTATIVA DO DISPLAYMANAGER:\n$nativeAttempt\n\n" +
+                        "PREFERÊNCIA NATIVA ANTES:\n$before\n\n" +
+                        "PREFERÊNCIA NATIVA DEPOIS:\n$after\n\n" +
+                        "$fallbackResult\n\nESTADO REAL DO DISPLAY:\n$state"
+                    status.text = "Preferências de 90 Hz reaplicadas. Confira no relatório se o HyperOS ativou 90 Hz; a resolução foi preservada."
+                    refreshDisplayInfo()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    diagnosticReport.text = "Falha ao solicitar 90 Hz: ${e.message}"
+                    status.text = "Não foi possível concluir a solicitação."
+                }
+            }
+        }
+    }
+
+    private fun startFpsDiagnostic() {
+        if (!hasShizukuPermission()) return
+        diagnosticStartButton.isEnabled = false
+        diagnosticReport.text = "Iniciando captura do SurfaceFlinger..."
+        worker.execute {
+            try {
+                val output = AtomicShizukuClient.run("dumpsys SurfaceFlinger --timestats -clear && dumpsys SurfaceFlinger --timestats -enable")
+                runOnUiThread {
+                    diagnosticStartButton.isEnabled = true
+                    diagnosticReport.text = "MEDIÇÃO INICIADA. Agora volte ao Free Fire, jogue por aproximadamente 30 segundos e retorne ao Atomic. Depois toque em FINALIZAR.\\n\\n$output"
+                    status.text = "Captura ativa. Jogue por 30 segundos e volte para finalizar."
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    diagnosticStartButton.isEnabled = true
+                    diagnosticReport.text = "Não foi possível iniciar a captura: ${e.message}\\nSeu Android pode não oferecer essa opção do SurfaceFlinger."
+                }
+            }
+        }
+    }
+
+    private fun finishFpsDiagnostic() {
+        if (!hasShizukuPermission()) return
+        diagnosticStopButton.isEnabled = false
+        diagnosticReport.text = "Lendo os quadros capturados..."
+        worker.execute {
+            try {
+                val dump = AtomicShizukuClient.run("dumpsys SurfaceFlinger --timestats -dump")
+                try {
+                    AtomicShizukuClient.run("dumpsys SurfaceFlinger --timestats -disable")
+                } catch (_: Exception) { }
+                val report = dump.take(14000)
+                val gameMentioned = dump.contains("com.dts.freefireth", ignoreCase = true) ||
+                    dump.contains("freefire", ignoreCase = true)
+                runOnUiThread {
+                    diagnosticStopButton.isEnabled = true
+                    diagnosticReport.text = (if (gameMentioned) {
+                        "O relatório menciona o Free Fire. Confira as camadas e contagens abaixo.\\n\\n"
+                    } else {
+                        "O nome do Free Fire não apareceu claramente no relatório. Isso não prova ausência de captura; confira as camadas listadas.\\n\\n"
+                    }) + report
+                    status.text = "Diagnóstico finalizado. Envie uma captura deste relatório para análise."
+                }
+            } catch (e: Exception) {
+                try { AtomicShizukuClient.run("dumpsys SurfaceFlinger --timestats -disable") } catch (_: Exception) { }
+                runOnUiThread {
+                    diagnosticStopButton.isEnabled = true
+                    diagnosticReport.text = "Falha ao ler o relatório: ${e.message}"
+                }
+            }
+        }
+    }
+
+    private fun copyDiagnosticLog() {
+        val report = diagnosticReport.text?.toString().orEmpty()
+        if (report.isBlank() || report == "O relatório aparecerá aqui.") {
+            status.text = "Gere o relatório primeiro para copiar o log."
+            return
+        }
+        val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Atomic 120 Hz - Log FPS", report))
+        status.text = "Log copiado! Agora é só colar aqui na conversa."
+    }
+
+    private fun restoreSettings() {
+        if (!hasShizukuPermission()) return
+        toggle.isEnabled = false
+        worker.execute {
+            try {
+                val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
+                val keys = listOf("min_refresh_rate", "peak_refresh_rate", "user_refresh_rate", "miui_refresh_rate", "thermal_limit_refresh_rate")
+                val restoreCommands = keys.mapNotNull { key ->
+                    if (!prefs.contains(key)) null
+                    else {
+                        val old = prefs.getString(key, "null") ?: "null"
+                        if (old == "null") "settings delete system $key" else "settings put system $key $old"
+                    }
+                }.toMutableList()
+                if (prefs.contains("global_user_preferred_refresh_rate")) {
+                    val oldGlobal = prefs.getString("global_user_preferred_refresh_rate", "null") ?: "null"
+                    restoreCommands.add(if (oldGlobal == "null") "settings delete global user_preferred_refresh_rate" else "settings put global user_preferred_refresh_rate $oldGlobal")
+                }
+                if (restoreCommands.isNotEmpty()) {
+                    AtomicShizukuClient.run(restoreCommands.joinToString(" && ") + " && cmd display clear-user-preferred-display-mode 2>/dev/null || true")
+                    prefs.edit().clear().apply()
+                } else {
+                    AtomicShizukuClient.run("settings delete system min_refresh_rate && settings delete system peak_refresh_rate")
+                }
+                runOnUiThread {
+                    enabled = false
+                    toggle.isEnabled = true
+                    status.text = "Preferências removidas. O sistema voltou a controlar a frequência."
+                    refreshDisplayInfo()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    toggle.isEnabled = true
+                    status.text = "Falha ao restaurar: ${e.message}"
+                }
+            }
+        }
+    }
+
+    private fun hasShizukuPermission(): Boolean {
+        val alive = try { Shizuku.pingBinder() } catch (_: Exception) { false }
+        val granted = alive && try { Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED } catch (_: Exception) { false }
+        shizukuReady = granted
+        updateConnectionUi()
+        if (!granted) {
+            status.text = if (alive) {
+                "Solicitando autorização do Shizuku. Aceite a janela de permissão e toque novamente na função."
+            } else {
+                "Inicie o serviço Shizuku por Depuração sem fio antes de continuar."
+            }
+            if (alive) {
+                try { Shizuku.requestPermission(SHIZUKU_PERMISSION_CODE) } catch (_: Exception) { }
+            }
+        }
+        return granted
+    }
+
+    private fun openShizukuDownload() {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$SHIZUKU_PACKAGE")))
+        } catch (_: Exception) {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/download/")))
+        }
+    }
+
+    private fun choose(hz: Int) {
+        selectedHz = hz
+        executeButton.text = "EXECUTAR COMANDOS PARA $hz FPS"
+        updateButtons()
+        status.text = "Selecionado: $hz Hz. Conecte o Shizuku para aplicar."
+    }
+
+    private fun refreshDisplayInfo() {
+        val display = window.decorView.display
+        val modes = display?.supportedModes?.map { it.refreshRate.toInt().toString() }?.distinct()
+        val current = display?.refreshRate
+        detected.text = "FREQUÊNCIA REPORTADA\n" +
+            (current?.let { "${it.toInt()} Hz" } ?: "Indisponível") +
+            "\n\nModos informados: " + (modes?.joinToString(" / ")?.plus(" Hz") ?: "não disponíveis")
+    }
+
+    private fun updateConnectionUi() {
+        if (!::connectButton.isInitialized || !::executeButton.isInitialized) return
+        connectButton.text = if (shizukuReady) "SHIZUKU CONECTADO E AUTORIZADO" else "CONECTAR AO SHIZUKU / AUTORIZAR"
+        executeButton.isEnabled = shizukuReady
+        executeButton.alpha = if (shizukuReady) 1f else .55f
+    }
+
+    private fun updateButtons() {
+        if (!::hz90.isInitialized) return
+        hz90.alpha = if (selectedHz == 90) 1f else .55f
+        hz120.alpha = if (selectedHz == 120) 1f else .55f
+    }
+
+    private fun stepTitle(value: String) = TextView(this).apply {
+        text = value
+        textSize = 17f
+        gravity = Gravity.CENTER
+        setTextColor(0xFF55C9FF.toInt())
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+    }
+
+    private fun actionButton(label: String, action: () -> Unit) = Button(this).apply {
+        text = label
+        isAllCaps = false
+        setTextColor(Color.WHITE)
+        backgroundTintList = ColorStateList.valueOf(0xFF174568.toInt())
+        setOnClickListener { action() }
+    }
+
+    private fun buttonParams(height: Int) = LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.MATCH_PARENT, dp(height)
+    )
+
+    private fun space(height: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(height)) }
+    private fun match() = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+
+    companion object {
+        private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
+        private const val SHIZUKU_PERMISSION_CODE = 120
+    }
+}
+}k 2>&1)\"; done")
             report.append(display)
 
             val thermal = read("6. ESTADO TÉRMICO / ECONOMIA DE ENERGIA (SOMENTE LEITURA)",
