@@ -430,7 +430,7 @@ class MainActivity : Activity() {
                 val nativeAttempt = try {
                     AtomicShizukuClient.run("cmd display set-user-preferred-display-mode $width $height 90 2>&1")
                 } catch (e: Exception) {
-                    "O HyperOS recusou o comando nativo: \${e.message}"
+                    "O HyperOS recusou o comando nativo: ${e.message}"
                 }
 
                 // Fallback: preferências de taxa já identificadas no Redmi/HyperOS.
@@ -460,7 +460,7 @@ class MainActivity : Activity() {
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    diagnosticReport.text = "Falha ao solicitar 90 Hz: \${e.message}"
+                    diagnosticReport.text = "Falha ao solicitar 90 Hz: ${e.message}"
                     status.text = "Não foi possível concluir a solicitação."
                 }
             }
