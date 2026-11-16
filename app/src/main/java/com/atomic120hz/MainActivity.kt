@@ -400,54 +400,68 @@ class MainActivity : Activity() {
 
     private fun requestNative90Hz() {
         if (!hasShizukuPermission()) return
-        status.text = "Consultando o comando oficial do DisplayManager..."
+        status.text = "Verificando a resolução física e aplicando as preferências de 90 Hz..."
         worker.execute {
             try {
-                // Em algumas versões do HyperOS, "cmd display help" imprime a ajuda
-                // mas retorna código diferente de zero. Não deixar isso abortar o fluxo.
-                val help = AtomicShizukuClient.run("cmd display help 2>&1 || true")
-                val supported = help.contains("set-user-preferred-display-mode", ignoreCase = true)
-                if (!supported) {
-                    runOnUiThread {
-                        diagnosticReport.text = "ESTE HYPEROS NÃO EXPÕE O COMANDO NATIVO.\\n\\n" + help.take(5000)
-                        status.text = "O comando de preferência de modo não está disponível nesta versão do sistema. Nenhuma alteração foi feita."
-                    }
-                    return@execute
-                }
-                // O ID do display é opcional no comando oficial; aplicar globalmente
-                // evita interpretar incorretamente a saída de get-displays.
+                // Apenas lê a resolução física; nunca altera wm size.
                 val sizeOutput = AtomicShizukuClient.run("wm size 2>&1 || true")
-                val sizeMatch = Regex("(?im)^Physical size:\\s*(\\d+)x(\\d+)").find(sizeOutput)
-                    ?: Regex("(\\d+)x(\\d+)").find(sizeOutput)
-                    ?: throw IOException("Não foi possível identificar a resolução do aparelho. Saída: $sizeOutput")
-                val width = sizeMatch.groupValues[1]
-                val height = sizeMatch.groupValues[2]
+                val physicalMatch = Regex("(?im)^Physical size:\\s*(\\d+)x(\\d+)").find(sizeOutput)
+                    ?: Regex("(?m)^(\\d+)x(\\d+)$").find(sizeOutput)
+                    ?: throw IOException("Não foi possível ler a resolução física. Saída: $sizeOutput")
+                val width = physicalMatch.groupValues[1]
+                val height = physicalMatch.groupValues[2]
                 val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
-                val oldGlobalRate = AtomicShizukuClient.run("settings get global user_preferred_refresh_rate 2>&1 || true").trim()
-                if (!prefs.contains("global_user_preferred_refresh_rate")) {
-                    prefs.edit().putString("global_user_preferred_refresh_rate", oldGlobalRate).apply()
+                val systemKeys = listOf(
+                    "min_refresh_rate", "peak_refresh_rate", "user_refresh_rate",
+                    "user_peak_refresh_rate", "miui_refresh_rate", "thermal_limit_refresh_rate"
+                )
+                systemKeys.forEach { key ->
+                    if (!prefs.contains(key)) {
+                        val old = AtomicShizukuClient.run("settings get system $key 2>&1 || true").trim()
+                        prefs.edit().putString(key, old).apply()
+                    }
                 }
+                if (!prefs.contains("global_user_preferred_refresh_rate")) {
+                    val old = AtomicShizukuClient.run("settings get global user_preferred_refresh_rate 2>&1 || true").trim()
+                    prefs.edit().putString("global_user_preferred_refresh_rate", old).apply()
+                }
+
                 val before = AtomicShizukuClient.run("cmd display get-user-preferred-display-mode 2>&1 || true")
                 val nativeAttempt = try {
                     AtomicShizukuClient.run("cmd display set-user-preferred-display-mode $width $height 90 2>&1")
                 } catch (e: Exception) {
-                    "COMANDO NATIVO RECUSADO: ${e.message}"
+                    "O HyperOS recusou o comando nativo: \${e.message}"
                 }
-                val globalWrite = AtomicShizukuClient.run("settings put global user_preferred_refresh_rate 90 && settings get global user_preferred_refresh_rate")
+
+                // Fallback: preferências de taxa já identificadas no Redmi/HyperOS.
+                // Não altera resolução, não desativa serviços e não remove proteção térmica.
+                val writes = systemKeys.joinToString(" ; ") {
+                    "settings put system $it 90 2>&1 || true"
+                } + " ; settings put global user_preferred_refresh_rate 90 2>&1 || true"
+                val verify = systemKeys.joinToString(" ; ") {
+                    "echo $it=\\$(settings get system $it 2>&1)"
+                } + " ; echo global_user_preferred_refresh_rate=\\$(settings get global user_preferred_refresh_rate 2>&1)"
+                val fallbackResult = AtomicShizukuClient.run(
+                    "$writes ; echo '--- CONFERENCIA DAS PREFERENCIAS ---' ; $verify"
+                )
                 val after = AtomicShizukuClient.run("cmd display get-user-preferred-display-mode 2>&1 || true")
-                val state = AtomicShizukuClient.run("dumpsys display | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|mDisplayModeSpecs|userPreferredModeId|renderFrameRate' | head -n 55")
+                val state = AtomicShizukuClient.run(
+                    "dumpsys display 2>&1 | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|mActiveModeId|mDesiredDisplayModeSpecs|mDisplayModeSpecs|mRefreshRateThrottling|renderFrameRate|supportedModes' | head -n 100"
+                )
                 runOnUiThread {
-                    diagnosticReport.text = "SOLICITAÇÃO DE 90 HZ / DIAGNÓSTICO\\n" +
-                        "Resolução física detectada: $width x $height\\n" +
-                        "COMANDO NATIVO:\\n$nativeAttempt\\n\\nPREFERÊNCIA GLOBAL GRAVADA (user_preferred_refresh_rate):\\n$globalWrite\\n" +
-                        "PREFERÊNCIA NATIVA APÓS A TENTATIVA:\\n$after\\n\\nESTADO REAL DO DISPLAY:\\n$state"
-                    status.text = if (globalWrite.trim().endsWith("90")) "Preferência global de 90 Hz gravada. Confira a taxa ativa; isso não garante que o HyperOS a aplique." else "O HyperOS não confirmou a preferência global de 90 Hz."
+                    diagnosticReport.text = "RESOLUÇÃO NATIVA + SOLICITAÇÃO DE 90 HZ\\n" +
+                        "Resolução física lida: $width x $height (nenhuma alteração de resolução foi executada).\\n\\n" +
+                        "TENTATIVA DO DISPLAYMANAGER:\\n$nativeAttempt\\n\\n" +
+                        "PREFERÊNCIA NATIVA ANTES:\\n$before\\n\\n" +
+                        "PREFERÊNCIA NATIVA DEPOIS:\\n$after\\n\\n" +
+                        "$fallbackResult\\n\\nESTADO REAL DO DISPLAY:\\n$state"
+                    status.text = "Preferências de 90 Hz reaplicadas. Confira no relatório se o HyperOS ativou 90 Hz; a resolução foi preservada."
                     refreshDisplayInfo()
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    diagnosticReport.text = "Falha ao solicitar modo nativo de 90 Hz: ${e.message}"
-                    status.text = "Não foi possível solicitar o modo de 90 Hz."
+                    diagnosticReport.text = "Falha ao solicitar 90 Hz: \${e.message}"
+                    status.text = "Não foi possível concluir a solicitação."
                 }
             }
         }
