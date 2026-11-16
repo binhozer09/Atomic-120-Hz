@@ -136,6 +136,8 @@ class MainActivity : Activity() {
         root.addView(space(8))
         root.addView(actionButton("VERIFICAR LIMITAÇÃO DO FREE FIRE") { diagnoseFreeFireLimit() }, buttonParams(52))
         root.addView(space(8))
+        root.addView(actionButton("TENTAR 90 FPS NO FREE FIRE") { tryFreeFire90Fps() }, buttonParams(58))
+        root.addView(space(8))
         root.addView(actionButton("INVESTIGAR POLÍTICAS DO ANDROID / HYPEROS") { investigateAndroidFpsPolicy() }, buttonParams(56))
         root.addView(space(8))
         root.addView(actionButton("FORÇAR 90 HZ (INCLUI LIMITE TÉRMICO)") { force90Hz() }, buttonParams(58))
@@ -271,6 +273,38 @@ class MainActivity : Activity() {
                     executeButton.isEnabled = true
                     status.text = "Falha ao solicitar $selectedHz Hz: ${e.message}"
                 }
+            }
+        }
+    }
+
+    private fun tryFreeFire90Fps() {
+        if (!hasShizukuPermission()) return
+        status.text = "Aplicando solicitação segura de 90 Hz e verificando o perfil do Free Fire..."
+        worker.execute {
+            try {
+                // Não acessa nem modifica os arquivos privados do Free Fire.
+                // Não altera thermal_limit_refresh_rate nem desativa proteções térmicas.
+                val keys = listOf("min_refresh_rate", "peak_refresh_rate", "user_refresh_rate", "user_peak_refresh_rate", "miui_refresh_rate")
+                val writes = keys.joinToString(" ; ") { "settings put system $it 90 2>&1 || true" } +
+                    " ; settings put global user_preferred_refresh_rate 90 2>&1 || true"
+                val verify = keys.joinToString(" ; ") { "echo $it=\\$(settings get system $it 2>&1)" } +
+                    " ; echo global_user_preferred_refresh_rate=\\$(settings get global user_preferred_refresh_rate 2>&1)"
+                val result = AtomicShizukuClient.run(
+                    "$writes ; echo '=== PREFERENCIAS DE 90 HZ ===' ; $verify" +
+                    " ; echo '=== PERFIL ANDROID DO FREE FIRE ===' ; device_config get game_overlay com.dts.freefireth 2>&1 || true" +
+                    " ; echo '=== GAME MANAGER ===' ; dumpsys game 2>&1 | grep -i -A 8 -B 3 'com.dts.freefireth' | head -n 50 || true" +
+                    " ; echo '=== CAMADA DO FREE FIRE ===' ; dumpsys SurfaceFlinger --list 2>&1 | grep -iE 'com.dts.freefireth|FFMainActivity' | head -n 30 || true" +
+                    " ; echo '=== DISPLAY ATIVO ===' ; dumpsys display 2>&1 | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|renderFrameRate' | head -n 25 || true"
+                ).take(10000)
+                runOnUiThread {
+                    diagnosticReport.text = "TENTATIVA DE 90 FPS — FREE FIRE\\n" +
+                        "Preferências de 90 Hz solicitadas e verificadas. A proteção térmica foi preservada.\\n" +
+                        "O Atomic não alterou arquivos privados do jogo: no Android 15 eles são isolados; além disso, mudar a preferência do display não força o motor do jogo a produzir 90 quadros.\\n\\n" + result
+                    status.text = "Solicitação aplicada. Abra o Free Fire e faça uma nova medição para confirmar os FPS reais."
+                    refreshDisplayInfo()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { status.text = "Falha na tentativa de 90 FPS: ${e.message}" }
             }
         }
     }
