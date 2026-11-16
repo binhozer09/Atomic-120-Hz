@@ -244,8 +244,15 @@ class MainActivity : Activity() {
         appendLog("Iniciando descoberta mDNS do serviço ADB de pareamento…")
         thread {
             try {
-                appendFromWorker("Pareando pelo endereço mDNS real do aparelho: $pairingHost:$pairingPort…")
-                runBlocking { withTimeout(20_000) { Kadb.pair(pairingHost, pairingPort, code) } }
+                // Igual ao fluxo do Shizuku: o mDNS serve para validar o serviço e obter a porta,
+                // mas o cliente de pareamento conecta ao adbd local pelo loopback.
+                // Em HyperOS, usar o IP Wi-Fi anunciado pelo mDNS pode deixar o TLS aguardando.
+                appendFromWorker("Pareamento ADB via loopback 127.0.0.1:$pairingPort (serviço mDNS validado em $pairingHost)…")
+                runBlocking {
+                    withTimeout(25_000) {
+                        Kadb.pair("127.0.0.1", pairingPort, code)
+                    }
+                }
                 appendFromWorker("Pareamento aceito. Procurando a porta segura de conexão…")
                 val connectEndpoint = discoverAdbEndpoint("_adb-tls-connect._tcp.")
                 appendFromWorker("Serviço de conexão identificado em ${connectEndpoint.first}:${connectEndpoint.second}. Abrindo sessão TLS…")
