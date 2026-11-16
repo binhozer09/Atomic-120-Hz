@@ -3,6 +3,8 @@ package com.atomic120hz
 import android.app.Activity
 import android.os.Bundle
 import android.content.Intent
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.net.Uri
 import android.graphics.Color
 import android.view.Gravity
@@ -30,6 +32,7 @@ class MainActivity : Activity() {
     private lateinit var diagnosticStartButton: Button
     private lateinit var diagnosticStopButton: Button
     private lateinit var diagnosticReport: TextView
+    private lateinit var diagnosticCopyButton: Button
     private val worker = Executors.newSingleThreadExecutor()
     private val permissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
         if (requestCode == SHIZUKU_PERMISSION_CODE) {
@@ -153,6 +156,9 @@ class MainActivity : Activity() {
             setBackgroundColor(0xFF102943.toInt())
         }
         root.addView(diagnosticReport, match())
+        root.addView(space(8))
+        diagnosticCopyButton = actionButton("COPIAR LOG COMPLETO") { copyDiagnosticLog() }
+        root.addView(diagnosticCopyButton, buttonParams(52))
         root.addView(space(18))
 
         root.addView(stepTitle("FREQUÊNCIA DESEJADA"))
@@ -300,7 +306,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun restoreSettings() {
+    private fun copyDiagnosticLog() {\n        val report = diagnosticReport.text?.toString().orEmpty()\n        if (report.isBlank() || report == "O relatório aparecerá aqui.") {\n            status.text = "Gere o relatório primeiro para copiar o log."\n            return\n        }\n        val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager\n        clipboard.setPrimaryClip(ClipData.newPlainText("Atomic 120 Hz - Log FPS", report))\n        status.text = "Log copiado! Agora é só colar aqui na conversa."\n    }\n\n    private fun restoreSettings() {
         if (!hasShizukuPermission()) return
         toggle.isEnabled = false
         worker.execute {
