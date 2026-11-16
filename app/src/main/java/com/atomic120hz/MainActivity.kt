@@ -242,21 +242,34 @@ class MainActivity : Activity() {
     private fun applySelectedMode() {
         if (!hasShizukuPermission()) return
         executeButton.isEnabled = false
-        status.text = "Executando e verificando os comandos..."
+        status.text = "Salvando preferências e solicitando $selectedHz Hz nas camadas compatíveis..."
         worker.execute {
             try {
-                val min = AtomicShizukuClient.run("settings put system min_refresh_rate $selectedHz && settings get system min_refresh_rate")
-                val max = AtomicShizukuClient.run("settings put system peak_refresh_rate $selectedHz && settings get system peak_refresh_rate")
+                val systemKeys = listOf("min_refresh_rate", "peak_refresh_rate", "user_refresh_rate", "user_peak_refresh_rate", "miui_refresh_rate")
+                val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
+                systemKeys.forEach { key ->
+                    val old = AtomicShizukuClient.run("settings get system $key 2>&1 || true").trim()
+                    if (!prefs.contains(key)) prefs.edit().putString(key, old).apply()
+                }
+                val oldGlobal = AtomicShizukuClient.run("settings get global user_preferred_refresh_rate 2>&1 || true").trim()
+                if (!prefs.contains("global_user_preferred_refresh_rate")) prefs.edit().putString("global_user_preferred_refresh_rate", oldGlobal).apply()
+                val writes = systemKeys.joinToString(" ; ") { "settings put system $it $selectedHz 2>&1" } +
+                    " ; settings put global user_preferred_refresh_rate $selectedHz 2>&1"
+                val verify = systemKeys.joinToString(" ; ") { "echo $it=\$(settings get system $it)" } +
+                    " ; echo global_user_preferred_refresh_rate=\$(settings get global user_preferred_refresh_rate)"
+                val result = AtomicShizukuClient.run("$writes ; echo '--- PREFERÊNCIAS GRAVADAS ---' ; $verify ; echo '--- DISPLAY ATIVO ---' ; dumpsys display | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|mDisplayModeSpecs|renderFrameRate' | head -n 35")
                 runOnUiThread {
                     executeButton.isEnabled = true
                     enabled = true
-                    status.text = "Comandos executados. Leitura do mínimo: $min Hz; máximo: $max Hz. FPS do jogo ainda depende do suporte do jogo/sistema."
+                    diagnosticReport.text = "PREFERÊNCIAS DE $selectedHz HZ SOLICITADAS\n" +
+                        "Foram alteradas preferências conhecidas de taxa de atualização. Limites térmicos e políticas internas do jogo não foram forçados.\n\n$result"
+                    status.text = "Preferências de $selectedHz Hz gravadas. A taxa ativa ainda depende das políticas do HyperOS e do jogo."
                     refreshDisplayInfo()
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     executeButton.isEnabled = true
-                    status.text = "Falha ao executar: ${e.message}"
+                    status.text = "Falha ao solicitar $selectedHz Hz: ${e.message}"
                 }
             }
         }
@@ -353,27 +366,34 @@ class MainActivity : Activity() {
 
     private fun force90Hz() {
         if (!hasShizukuPermission()) return
-        status.text = "Salvando valores atuais e solicitando 90 Hz ao HyperOS..."
+        status.text = "Salvando valores atuais e solicitando 90 Hz em todas as preferências compatíveis..."
         worker.execute {
             try {
-                val keys = listOf("min_refresh_rate", "peak_refresh_rate", "user_refresh_rate", "miui_refresh_rate", "thermal_limit_refresh_rate")
-                val before = AtomicShizukuClient.run(keys.joinToString("\n") { "echo $it=$(settings get system $it)" })
+                val systemKeys = listOf("min_refresh_rate", "peak_refresh_rate", "user_refresh_rate", "user_peak_refresh_rate", "miui_refresh_rate")
                 val prefs = getSharedPreferences("atomic_refresh_backup", MODE_PRIVATE)
-                before.lineSequence().forEach { line ->
-                    val idx = line.indexOf('=')
-                    if (idx > 0) prefs.edit().putString(line.substring(0, idx), line.substring(idx + 1).trim()).apply()
+                systemKeys.forEach { key ->
+                    val old = AtomicShizukuClient.run("settings get system $key 2>&1 || true").trim()
+                    if (!prefs.contains(key)) prefs.edit().putString(key, old).apply()
                 }
-                val writes = keys.joinToString(" && ") { "settings put system $it 90" }
-                val result = AtomicShizukuClient.run("$writes && echo '--- VALORES APLICADOS ---' && " +
-                    keys.joinToString(" && ") { "echo $it=$(settings get system $it)" } +
-                    " && echo '--- DISPLAY ATIVO ---' && dumpsys display | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|mActiveModeId|mDesiredDisplayModeSpecs' | head -n 24")
+                val oldGlobal = AtomicShizukuClient.run("settings get global user_preferred_refresh_rate 2>&1 || true").trim()
+                if (!prefs.contains("global_user_preferred_refresh_rate")) prefs.edit().putString("global_user_preferred_refresh_rate", oldGlobal).apply()
+                val writes = systemKeys.joinToString(" ; ") { "settings put system $it 90 2>&1" } +
+                    " ; settings put global user_preferred_refresh_rate 90 2>&1"
+                val verify = systemKeys.joinToString(" ; ") { "echo $it=\$(settings get system $it)" } +
+                    " ; echo global_user_preferred_refresh_rate=\$(settings get global user_preferred_refresh_rate)"
+                val result = AtomicShizukuClient.run(
+                    "$writes ; echo '--- PREFERÊNCIAS GRAVADAS ---' ; $verify" +
+                    " ; echo '--- ESTADO REAL DO DISPLAY ---' ; dumpsys display | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|mActiveModeId|mDesiredDisplayModeSpecs|mDisplayModeSpecs|renderFrameRate|mRefreshRateThrottling' | head -n 55" +
+                    " ; echo '--- PERFIL DE FPS DO FREE FIRE (LEITURA) ---' ; dumpsys game 2>&1 | grep -i -A 8 -B 3 'com.dts.freefireth' | head -n 45"
+                )
                 runOnUiThread {
-                    status.text = "Solicitação de 90 Hz aplicada. O HyperOS ainda pode impor uma política de hardware/temperatura."
-                    diagnosticReport.text = "ATOMIC 120 HZ — SOLICITAÇÃO FORÇADA DE 90 HZ\n" +
-                        "Valores anteriores salvos para restauração. Não desativa proteções térmicas de CPU/GPU/bateria.\n\n" + result
+                    status.text = "Preferências compatíveis de 90 Hz gravadas. Limites de jogo, hardware e temperatura continuam sob controle do sistema."
+                    diagnosticReport.text = "ATOMIC 120 HZ — APLICAÇÃO AMPLIADA DE 90 HZ\n" +
+                        "Valores anteriores salvos para restauração. Nenhum limite térmico foi alterado; políticas internas do jogo/HyperOS não são sobrescritas.\n\n" + result
+                    refreshDisplayInfo()
                 }
             } catch (e: Exception) {
-                runOnUiThread { status.text = "Falha ao solicitar 90 Hz: \${e.message}" }
+                runOnUiThread { status.text = "Falha ao solicitar 90 Hz: ${e.message}" }
             }
         }
     }
