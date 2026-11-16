@@ -310,6 +310,25 @@ class MainActivity : Activity() {
                 output.appendLine("user_preferred_refresh_rate: " +
                     run("settings put global user_preferred_refresh_rate $selectedHz"))
 
+                // SurfaceFlinger: tenta habilitar o override e confirma o valor efetivo.
+                // A propriedade ro.* costuma ser somente leitura após a inicialização;
+                // portanto, não tratamos a tentativa como sucesso sem leitura de volta.
+                output.appendLine()
+                output.appendLine("SURFACEFLINGER — FRAME RATE OVERRIDE")
+                val overrideBefore = run("getprop ro.surface_flinger.enable_frame_rate_override").trim()
+                output.appendLine("Valor antes: ${overrideBefore.ifBlank { "(vazio)" }}")
+                val overrideAttempt = run("setprop ro.surface_flinger.enable_frame_rate_override true 2>&1")
+                output.appendLine("Tentativa de ativação: ${overrideAttempt.ifBlank { "(sem mensagem)" }}")
+                val overrideAfter = run("getprop ro.surface_flinger.enable_frame_rate_override").trim()
+                output.appendLine("Valor depois: ${overrideAfter.ifBlank { "(vazio)" }}")
+                output.appendLine(
+                    if (overrideAfter.equals("true", true)) {
+                        "RESULTADO: propriedade confirmada como true."
+                    } else {
+                        "RESULTADO: não foi possível ativar por comando. Propriedades ro.* são somente leitura após a inicialização nesta ROM; o Atomic não altera partições nem arquivos do sistema."
+                    }
+                )
+
                 output.appendLine()
                 output.appendLine("MODO NATIVO DO DISPLAY MANAGER")
                 val sizeOutput = run("wm size")
