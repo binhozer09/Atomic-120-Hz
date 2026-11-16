@@ -439,8 +439,8 @@ class MainActivity : Activity() {
                     "settings put system $it 90 2>&1 || true"
                 } + " ; settings put global user_preferred_refresh_rate 90 2>&1 || true"
                 val verify = systemKeys.joinToString(" ; ") {
-                    "echo $it=\\$(settings get system $it 2>&1)"
-                } + " ; echo global_user_preferred_refresh_rate=\\$(settings get global user_preferred_refresh_rate 2>&1)"
+                    "echo $it=\$(settings get system $it 2>&1)"
+                } + " ; echo global_user_preferred_refresh_rate=\$(settings get global user_preferred_refresh_rate 2>&1)"
                 val fallbackResult = AtomicShizukuClient.run(
                     "$writes ; echo '--- CONFERENCIA DAS PREFERENCIAS ---' ; $verify"
                 )
@@ -449,12 +449,12 @@ class MainActivity : Activity() {
                     "dumpsys display 2>&1 | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|mActiveModeId|mDesiredDisplayModeSpecs|mDisplayModeSpecs|mRefreshRateThrottling|renderFrameRate|supportedModes' | head -n 100"
                 )
                 runOnUiThread {
-                    diagnosticReport.text = "RESOLUÇÃO NATIVA + SOLICITAÇÃO DE 90 HZ\\n" +
-                        "Resolução física lida: $width x $height (nenhuma alteração de resolução foi executada).\\n\\n" +
-                        "TENTATIVA DO DISPLAYMANAGER:\\n$nativeAttempt\\n\\n" +
-                        "PREFERÊNCIA NATIVA ANTES:\\n$before\\n\\n" +
-                        "PREFERÊNCIA NATIVA DEPOIS:\\n$after\\n\\n" +
-                        "$fallbackResult\\n\\nESTADO REAL DO DISPLAY:\\n$state"
+                    diagnosticReport.text = "RESOLUÇÃO NATIVA + SOLICITAÇÃO DE 90 HZ\n" +
+                        "Resolução física lida: $width x $height (nenhuma alteração de resolução foi executada).\n\n" +
+                        "TENTATIVA DO DISPLAYMANAGER:\n$nativeAttempt\n\n" +
+                        "PREFERÊNCIA NATIVA ANTES:\n$before\n\n" +
+                        "PREFERÊNCIA NATIVA DEPOIS:\n$after\n\n" +
+                        "$fallbackResult\n\nESTADO REAL DO DISPLAY:\n$state"
                     status.text = "Preferências de 90 Hz reaplicadas. Confira no relatório se o HyperOS ativou 90 Hz; a resolução foi preservada."
                     refreshDisplayInfo()
                 }
