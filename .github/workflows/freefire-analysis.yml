@@ -31,8 +31,8 @@ jobs:
               print("Official page:", response.geturl())
               print("HTTP:", response.status)
           patterns = [
-              r'''(?:href|src)\\s*=\\s*["']([^"']+)["']''',
-              r'''https?://[^"'\\s<>]+'''
+              r'''(?:href|src)\s*=\s*["']([^"']+)["']''',
+              r'''https?://[^"'\s<>]+'''
           ]
           candidates = set()
           for pattern in patterns:
@@ -46,7 +46,7 @@ jobs:
           for url in sorted(candidates):
               print(url)
           with open("candidates.txt", "w") as f:
-              f.write("\\n".join(sorted(candidates)))
+              f.write("\n".join(sorted(candidates)))
           if not candidates:
               raise SystemExit("No APK URL exposed in the official page HTML; stopping without using third-party APK mirrors.")
           PY
