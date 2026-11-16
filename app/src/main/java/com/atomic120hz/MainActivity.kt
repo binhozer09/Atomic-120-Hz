@@ -35,6 +35,7 @@ class MainActivity : Activity() {
     private lateinit var diagnosticReport: TextView
     private lateinit var diagnosticCopyButton: Button
     private lateinit var exploreFreeFireButton: Button
+    private lateinit var autoFixButton: Button
     private val worker = Executors.newSingleThreadExecutor()
     private val permissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
         if (requestCode == SHIZUKU_PERMISSION_CODE) {
@@ -138,6 +139,9 @@ class MainActivity : Activity() {
         root.addView(actionButton("VERIFICAR LIMITAÇÃO DO FREE FIRE") { diagnoseFreeFireLimit() }, buttonParams(52))
         exploreFreeFireButton = actionButton("EXPLORAR PASTAS DO FREE FIRE (LEITURA)") { exploreFreeFireStorage() }
         root.addView(exploreFreeFireButton, buttonParams(56))
+        root.addView(space(8))
+        autoFixButton = actionButton("ANALISAR E CORRIGIR AUTOMATICAMENTE") { runAutomaticDiagnosisAndRepair() }
+        root.addView(autoFixButton, buttonParams(58))
         root.addView(space(8))
         root.addView(space(8))
         root.addView(actionButton("TENTAR 90 FPS NO FREE FIRE") { tryFreeFire90Fps() }, buttonParams(58))
@@ -384,6 +388,101 @@ class MainActivity : Activity() {
                 exploreFreeFireButton.isEnabled = true
                 diagnosticReport.text = report.toString().take(14000)
                 status.text = "Exploração concluída. Confira quais caminhos estão acessíveis e quais foram bloqueados."
+            }
+        }
+    }
+
+    /**
+     * Diagnóstico local por regras, sem chave de API ou conexão externa.
+     * Corrige somente preferências públicas de taxa de atualização; nunca altera
+     * arquivos do Free Fire, limites térmicos, SELinux, permissões ou anti-cheat.
+     */
+    private fun runAutomaticDiagnosisAndRepair() {
+        if (!hasShizukuPermission()) return
+        autoFixButton.isEnabled = false
+        status.text = "Analisando o sistema e aplicando apenas correções seguras..."
+        worker.execute {
+            fun read(command: String): String = try {
+                AtomicShizukuClient.run(command).ifBlank { "(sem saída)" }
+            } catch (e: Exception) {
+                "ERRO: ${e.message ?: "sem detalhes"}"
+            }
+
+            val report = StringBuilder()
+            report.appendLine("=== ATOMIC 120 HZ — DIAGNÓSTICO AUTOMÁTICO ===")
+            report.appendLine("Motor: análise local por regras; não exige chave de API nem envia dados para a internet.")
+            report.appendLine()
+
+            val packagePath = read("pm path com.dts.freefireth 2>&1")
+            report.appendLine("1) FREE FIRE INSTALADO")
+            report.appendLine(packagePath)
+            val gameInstalled = packagePath.contains("package:", true)
+
+            val identity = read("id; getenforce 2>&1")
+            report.appendLine()
+            report.appendLine("2) IDENTIDADE SHIZUKU / SELINUX")
+            report.appendLine(identity)
+
+            val external = read("ls -ld /sdcard/Android/data/com.dts.freefireth /sdcard/Android/obb/com.dts.freefireth 2>&1")
+            report.appendLine()
+            report.appendLine("3) PASTAS EXTERNAS")
+            report.appendLine(external)
+
+            val thermal = read("dumpsys thermalservice 2>&1 | head -n 70")
+            report.appendLine()
+            report.appendLine("4) ESTADO TÉRMICO (SOMENTE LEITURA)")
+            report.appendLine(thermal)
+
+            val gameInfo = read("dumpsys game 2>&1 | grep -i -A 8 -B 3 'com.dts.freefireth' | head -n 70")
+            val overlay = read("device_config get game_overlay com.dts.freefireth 2>&1")
+            report.appendLine()
+            report.appendLine("5) PERFIL DE JOGO / GAME MANAGER")
+            report.appendLine("Game Manager:\\n$gameInfo")
+            report.appendLine("Game overlay: $overlay")
+
+            report.appendLine()
+            report.appendLine("6) CORREÇÕES AUTOMÁTICAS PERMITIDAS")
+            if (!gameInstalled) {
+                report.appendLine("Nenhuma correção aplicada: o pacote com.dts.freefireth não foi localizado.")
+            } else {
+                val keys = listOf("peak_refresh_rate", "user_refresh_rate", "user_peak_refresh_rate", "miui_refresh_rate")
+                val changes = mutableListOf<String>()
+                for (key in keys) {
+                    val before = read("settings get system $key").trim()
+                    val write = read("settings put system $key 90 2>&1")
+                    val after = read("settings get system $key").trim()
+                    changes.add("$key: antes=$before; depois=$after; retorno=$write")
+                }
+                val globalBefore = read("settings get global user_preferred_refresh_rate").trim()
+                val globalWrite = read("settings put global user_preferred_refresh_rate 90 2>&1")
+                val globalAfter = read("settings get global user_preferred_refresh_rate").trim()
+                changes.add("global user_preferred_refresh_rate: antes=$globalBefore; depois=$globalAfter; retorno=$globalWrite")
+                report.appendLine(changes.joinToString("\\n"))
+                report.appendLine("A preferência min_refresh_rate não foi forçada para evitar manter o painel em frequência alta continuamente.")
+            }
+
+            val display = read("dumpsys display 2>&1 | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|mDesiredDisplayModeSpecs|mDisplayModeSpecs|renderFrameRate|mRefreshRateThrottling|defaultPeakRefreshRate' | head -n 65")
+            report.appendLine()
+            report.appendLine("7) VERIFICAÇÃO DO DISPLAY APÓS A CORREÇÃO")
+            report.appendLine(display)
+
+            report.appendLine()
+            report.appendLine("=== CONCLUSÃO AUTOMÁTICA ===")
+            if (!gameInstalled) {
+                report.appendLine("O Free Fire não foi encontrado. Nenhuma preferência foi modificada.")
+            } else if (display.contains("60.0") || display.contains("60 Hz")) {
+                report.appendLine("O sistema ainda mostra referências a 60 Hz. Pode haver política do HyperOS, modo de tela ou limitação do jogo.")
+            } else {
+                report.appendLine("Preferências de 90 Hz solicitadas. Isso não comprova 90 FPS dentro do jogo; é necessário medir a camada do Free Fire durante uma partida.")
+            }
+            report.appendLine("Proteções térmicas, SELinux, arquivos privados do jogo e mecanismos anti-cheat permaneceram intactos.")
+            report.appendLine("Este motor local identifica e corrige apenas situações conhecidas e seguras; não é uma cópia do ChatGPT e não pode garantir desbloqueio de FPS.")
+
+            runOnUiThread {
+                autoFixButton.isEnabled = true
+                diagnosticReport.text = report.toString().take(18000)
+                status.text = "Diagnóstico automático concluído. Veja o relatório e a verificação final."
+                refreshDisplayInfo()
             }
         }
     }
