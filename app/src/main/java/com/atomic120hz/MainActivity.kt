@@ -279,32 +279,51 @@ class MainActivity : Activity() {
 
     private fun tryFreeFire90Fps() {
         if (!hasShizukuPermission()) return
-        status.text = "Aplicando solicitação segura de 90 Hz e verificando o perfil do Free Fire..."
+        status.text = "Solicitando 90 Hz e verificando o perfil do Free Fire..."
         worker.execute {
-            try {
-                // Não acessa nem modifica os arquivos privados do Free Fire.
-                // Não altera thermal_limit_refresh_rate nem desativa proteções térmicas.
-                val keys = listOf("min_refresh_rate", "peak_refresh_rate", "user_refresh_rate", "user_peak_refresh_rate", "miui_refresh_rate")
-                val writes = keys.joinToString(" ; ") { "settings put system $it 90 2>&1 || true" } +
-                    " ; settings put global user_preferred_refresh_rate 90 2>&1 || true"
-                val verify = keys.joinToString(" ; ") { "echo $it=\\$(settings get system $it 2>&1)" } +
-                    " ; echo global_user_preferred_refresh_rate=\\$(settings get global user_preferred_refresh_rate 2>&1)"
-                val result = AtomicShizukuClient.run(
-                    "$writes ; echo '=== PREFERENCIAS DE 90 HZ ===' ; $verify" +
-                    " ; echo '=== PERFIL ANDROID DO FREE FIRE ===' ; device_config get game_overlay com.dts.freefireth 2>&1 || true" +
-                    " ; echo '=== GAME MANAGER ===' ; dumpsys game 2>&1 | grep -i -A 8 -B 3 'com.dts.freefireth' | head -n 50 || true" +
-                    " ; echo '=== CAMADA DO FREE FIRE ===' ; dumpsys SurfaceFlinger --list 2>&1 | grep -iE 'com.dts.freefireth|FFMainActivity' | head -n 30 || true" +
-                    " ; echo '=== DISPLAY ATIVO ===' ; dumpsys display 2>&1 | grep -iE 'mActiveSfDisplayMode|mActiveRenderFrameRate|renderFrameRate' | head -n 25 || true"
-                ).take(10000)
-                runOnUiThread {
-                    diagnosticReport.text = "TENTATIVA DE 90 FPS — FREE FIRE\\n" +
-                        "Preferências de 90 Hz solicitadas e verificadas. A proteção térmica foi preservada.\\n" +
-                        "O Atomic não alterou arquivos privados do jogo: no Android 15 eles são isolados; além disso, mudar a preferência do display não força o motor do jogo a produzir 90 quadros.\\n\\n" + result
-                    status.text = "Solicitação aplicada. Abra o Free Fire e faça uma nova medição para confirmar os FPS reais."
-                    refreshDisplayInfo()
-                }
+            // Cada comando é executado separadamente: evita erros de parsing do shell
+            // causados por encadeamento, pipes e substituição de comandos.
+            fun check(command: String): String = try {
+                AtomicShizukuClient.run(command).ifBlank { "(sem saída)" }
             } catch (e: Exception) {
-                runOnUiThread { status.text = "Falha na tentativa de 90 FPS: ${e.message}" }
+                "ERRO: ${e.message ?: "falha sem detalhes"}"
+            }
+
+            val keys = listOf("min_refresh_rate", "peak_refresh_rate", "user_refresh_rate", "user_peak_refresh_rate", "miui_refresh_rate")
+            val report = StringBuilder()
+            report.appendLine("=== SOLICITAÇÃO DE 90 HZ ===")
+            for (key in keys) {
+                report.appendLine("$key: " + check("settings put system $key 90"))
+            }
+            report.appendLine("user_preferred_refresh_rate: " + check("settings put global user_preferred_refresh_rate 90"))
+
+            report.appendLine("\\n=== VALORES GRAVADOS ===")
+            for (key in keys) {
+                report.appendLine("$key=" + check("settings get system $key"))
+            }
+            report.appendLine("global_user_preferred_refresh_rate=" + check("settings get global user_preferred_refresh_rate"))
+
+            report.appendLine("\\n=== PERFIL ANDROID DO FREE FIRE ===")
+            report.appendLine(check("device_config get game_overlay com.dts.freefireth"))
+
+            report.appendLine("\\n=== GAME MANAGER (LINHAS RELEVANTES) ===")
+            val gameDump = check("dumpsys game")
+            report.appendLine(gameDump.lineSequence().filter { it.contains("com.dts.freefireth", true) || it.contains("fps", true) || it.contains("mode", true) }.take(50).joinToString("\\n").ifBlank { "(nenhuma linha relevante)" })
+
+            report.appendLine("\\n=== CAMADA DO FREE FIRE ===")
+            val layers = check("dumpsys SurfaceFlinger --list")
+            report.appendLine(layers.lineSequence().filter { it.contains("com.dts.freefireth", true) || it.contains("FFMainActivity", true) }.take(30).joinToString("\\n").ifBlank { "(camada não localizada)" })
+
+            report.appendLine("\\n=== DISPLAY ATIVO ===")
+            val display = check("dumpsys display")
+            report.appendLine(display.lineSequence().filter { it.contains("mActiveSfDisplayMode", true) || it.contains("mActiveRenderFrameRate", true) || it.contains("renderFrameRate", true) }.take(25).joinToString("\\n").ifBlank { "(dados de taxa não encontrados)" })
+
+            runOnUiThread {
+                diagnosticReport.text = "TENTATIVA DE 90 FPS — FREE FIRE\\n" +
+                    "Comandos executados individualmente para evitar erro de sintaxe. A proteção térmica foi preservada.\\n\\n" +
+                    report.toString().take(10000)
+                status.text = "Diagnóstico concluído. Confira os erros individuais no relatório."
+                refreshDisplayInfo()
             }
         }
     }
