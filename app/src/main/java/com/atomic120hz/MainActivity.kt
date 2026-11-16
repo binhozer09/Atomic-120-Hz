@@ -240,10 +240,16 @@ class MainActivity : Activity() {
             try {
                 val min = AtomicShizukuClient.run("settings put system min_refresh_rate $selectedHz && settings get system min_refresh_rate")
                 val max = AtomicShizukuClient.run("settings put system peak_refresh_rate $selectedHz && settings get system peak_refresh_rate")
+                val preferred = if (selectedHz == 90) {
+                    AtomicShizukuClient.run("cmd display set-user-preferred-display-mode 1080 2460 90 && cmd display get-user-preferred-display-mode")
+                } else {
+                    "Modo preferido do display não alterado: este aparelho não possui 120 Hz."
+                }
+                val active = AtomicShizukuClient.run("dumpsys display | grep -iE 'mActiveRenderFrameRate|mActiveSfDisplayMode|renderFrameRate' | head -n 12")
                 runOnUiThread {
                     executeButton.isEnabled = true
                     enabled = true
-                    status.text = "Comandos executados. Leitura do mínimo: $min Hz; máximo: $max Hz. FPS do jogo ainda depende do suporte do jogo/sistema."
+                    status.text = "Tentativa de 90 Hz concluída. Preferência: $preferred. Mínimo: $min; máximo: $max. Estado ativo: $active. Se continuar em 60 Hz, o HyperOS está impondo outro limite."
                     refreshDisplayInfo()
                 }
             } catch (e: Exception) {
@@ -406,6 +412,7 @@ class MainActivity : Activity() {
         toggle.isEnabled = false
         worker.execute {
             try {
+                AtomicShizukuClient.run("cmd display clear-user-preferred-display-mode")
                 AtomicShizukuClient.run("settings delete system min_refresh_rate")
                 AtomicShizukuClient.run("settings delete system peak_refresh_rate")
                 runOnUiThread {
