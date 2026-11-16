@@ -358,7 +358,7 @@ class MainActivity : Activity() {
                 val report = StringBuilder()
                 report.appendLine("=== ATOMIC 120 HZ — ANÁLISE AVANÇADA DO APK ===")
                 report.appendLine("MODO: SOMENTE LEITURA. Nenhum arquivo será alterado.")
-                report.appendLine("APKs encontrados: \${apkPaths.size} (base + splits instalados)")
+                report.appendLine("APKs encontrados: ${apkPaths.size} (base + splits instalados)")
                 var totalEntries = 0
                 var totalBytes = 0L
                 var totalCandidates = 0
@@ -368,8 +368,8 @@ class MainActivity : Activity() {
                 for ((apkIndex, apkPath) in apkPaths.withIndex()) {
                     val apkFile = java.io.File(apkPath)
                     report.appendLine()
-                    report.appendLine("APK \${apkIndex + 1}: $apkPath")
-                    report.appendLine("Tamanho: \${apkFile.length()} bytes")
+                    report.appendLine("APK ${apkIndex + 1}: $apkPath")
+                    report.appendLine("Tamanho: ${apkFile.length()} bytes")
                     java.util.zip.ZipFile(apkPath).use { zip ->
                         val entries = zip.entries()
                         while (entries.hasMoreElements()) {
@@ -385,7 +385,7 @@ class MainActivity : Activity() {
                                 lower.endsWith(".ini") || lower.endsWith(".cfg") ||
                                 lower.endsWith(".conf") || lower.endsWith(".properties")
                             if (configLike && fileCandidates.size < 100) {
-                                fileCandidates.add("APK \${apkIndex + 1}: $name (\${entry.size} bytes)")
+                                fileCandidates.add("APK ${apkIndex + 1}: $name (${entry.size} bytes)")
                             }
                             val inspectable = configLike || lower.endsWith(".dex")
                             if (!inspectable || entry.size !in 1..(4L * 1024 * 1024) ||
@@ -422,8 +422,8 @@ class MainActivity : Activity() {
                                     lower.endsWith(".dex") -> "CÓDIGO DEX (REFERÊNCIA TEXTUAL)"
                                     else -> "RECURSO / ASSET"
                                 }
-                                findings.add("[$category] APK \${apkIndex + 1}: $name")
-                                if (numericHits.isNotEmpty()) findings.add("  VALORES PRÓXIMOS A TERMOS DE FPS: \${numericHits.joinToString(" | ")}")
+                                findings.add("[$category] APK ${apkIndex + 1}: $name")
+                                if (numericHits.isNotEmpty()) findings.add("  VALORES PRÓXIMOS A TERMOS DE FPS: ${numericHits.joinToString(" | ")}")
                                 contexts.forEach { findings.add("  CONTEXTO: $it") }
                             }
                         }
@@ -433,7 +433,7 @@ class MainActivity : Activity() {
                 report.appendLine("=== RESUMO DA VARREDURA ===")
                 report.appendLine("Entradas ZIP examinadas: $totalEntries")
                 report.appendLine("Conteúdo examinado: $totalBytes bytes (limite total: 48 MiB)")
-                report.appendLine("Arquivos candidatos de configuração listados: \${fileCandidates.size}")
+                report.appendLine("Arquivos candidatos de configuração listados: ${fileCandidates.size}")
                 report.appendLine("Arquivos com referências textuais relacionadas: $totalCandidates")
                 report.appendLine()
                 report.appendLine("=== ARQUIVOS / RECURSOS CANDIDATOS ===")
@@ -458,7 +458,7 @@ class MainActivity : Activity() {
             } catch (e: Exception) {
                 runOnUiThread {
                     inspectApkButton.isEnabled = true
-                    diagnosticReport.text = "Não foi possível analisar os APKs instalados: \${e.javaClass.simpleName}: \${e.message}\n\nA análise não modificou nenhum arquivo."
+                    diagnosticReport.text = "Não foi possível analisar os APKs instalados: ${e.javaClass.simpleName}: ${e.message}\n\nA análise não modificou nenhum arquivo."
                     status.text = "Falha ao analisar os APKs do Free Fire."
                 }
             }
