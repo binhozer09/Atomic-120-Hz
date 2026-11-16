@@ -309,20 +309,20 @@ class MainActivity : Activity() {
                         toggle.text = "RESTAURAR MODO ANTERIOR"
                         toggle.backgroundTintList = ColorStateList.valueOf(0xFF087A58.toInt())
                         status.text = "PREFERÊNCIA DE TELA ACEITA PELO ANDROID: " + hz.toInt() + " Hz." +
-                            "\\nA leitura confirma o modo preferido, mas não garante que o jogo manterá essa frequência." +
-                            "\\n\\nComando: " + command +
-                            "\\nRetorno: " + commandResult +
-                            "\\nLeitura: " + preferred +
-                            "\\n\\nDiagnóstico da tela:\\n" + displayDump
+                            "\nA leitura confirma o modo preferido, mas não garante que o jogo manterá essa frequência." +
+                            "\n\nComando: " + command +
+                            "\nRetorno: " + commandResult +
+                            "\nLeitura: " + preferred +
+                            "\n\nDiagnóstico da tela:\n" + displayDump
                     } else {
                         enabled = false
                         toggle.text = "TENTAR APLICAR " + hz.toInt() + " Hz"
                         toggle.backgroundTintList = ColorStateList.valueOf(0xFF174568.toInt())
                         status.text = "O Android não confirmou o modo preferido solicitado." +
-                            "\\nComando: " + command +
-                            "\\nRetorno: " + commandResult +
-                            "\\nLeitura: " + preferred +
-                            "\\n\\nDiagnóstico da tela:\\n" + displayDump
+                            "\nComando: " + command +
+                            "\nRetorno: " + commandResult +
+                            "\nLeitura: " + preferred +
+                            "\n\nDiagnóstico da tela:\n" + displayDump
                     }
                     refreshDisplayInfo()
                 }
@@ -360,7 +360,7 @@ class MainActivity : Activity() {
                         toggle.isEnabled = true
                         toggle.text = "APLICAR " + selectedHz.toInt() + " Hz"
                         toggle.backgroundTintList = ColorStateList.valueOf(0xFF174568.toInt())
-                        status.text = "Modo de tela anterior restaurado.\\n" + restoreResult
+                        status.text = "Modo de tela anterior restaurado.\n" + restoreResult
                         refreshDisplayInfo()
                     }
                 } else {
