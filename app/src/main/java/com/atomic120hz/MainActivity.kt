@@ -410,7 +410,7 @@ class MainActivity : Activity() {
                     diagnosticReport.text = "SOLICITAÇÃO NATIVA DE 90 HZ\\n" +
                         "Display detectado: $displayId\\nResolução física detectada: $width x $height\\n" +
                         "PREFERÊNCIA ANTERIOR:\\n$before\\n\\nRESULTADO DO COMANDO:\\n$applied\\n\\nPREFERÊNCIA APÓS A SOLICITAÇÃO:\\n$after\\n\\nESTADO REAL DO DISPLAY:\\n$state"
-                    status.text = "Solicitação enviada ao display $displayId. Confira a taxa ativa abaixo; o HyperOS ainda pode limitar a 60 Hz."
+                    status.text = "Preferência global de 90 Hz enviada. Confira a taxa ativa abaixo; o HyperOS ainda pode limitar a 60 Hz."
                     refreshDisplayInfo()
                 }
             } catch (e: Exception) {
